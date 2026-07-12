@@ -1,9 +1,10 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
-import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus } from 'lucide-react';
 import { useQueries } from '../../hooks/useQueries';
 import { useEndpoints } from '../../hooks/useEndpoints';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProjects } from '../../contexts/ProjectsContext';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { supabase } from '../../lib/supabase';
@@ -37,10 +38,16 @@ const getMethodBadgeClasses = (method: string) => {
   }
 };
 
+const FOLDER_COLORS = [
+  '#EF4444', '#F97316', '#F59E0B', '#22C55E',
+  '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899'
+];
+
 export default function QueryManager() {
   const { queries, loading, createQuery, updateQuery, deleteQuery } = useQueries();
   const { endpoints, nodalDatabases } = useEndpoints();
-  const { activeCompany } = useAuth();
+  const { activeCompany, user } = useAuth();
+  const { projects, createProject, createDashboard } = useProjects();
   const { fixedValues, getResolvedValue } = useFixedValues();
   const { resolveLookup, getLookupState } = useLookupResolver();
 
@@ -70,10 +77,126 @@ export default function QueryManager() {
   const [testCopied, setTestCopied] = useState(false);
   const testTabulatorRef = useRef<Tabulator | null>(null);
 
+  // Create Dashboard from Query state
+  const [showCreateDashboard, setShowCreateDashboard] = useState(false);
+  const [createDashboardQueryId, setCreateDashboardQueryId] = useState<string | null>(null);
+  const [createDashboardName, setCreateDashboardName] = useState('');
+  const [createDashboardFolderId, setCreateDashboardFolderId] = useState('');
+  const [createDashboardError, setCreateDashboardError] = useState('');
+  const [creatingDashboard, setCreatingDashboard] = useState(false);
+  const [showNewFolderInline, setShowNewFolderInline] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderColor, setNewFolderColor] = useState('#3B82F6');
+  const [dashboardCreatedId, setDashboardCreatedId] = useState<string | null>(null);
+
   const filteredQueries = useMemo(() => {
     if (purposeTypeFilter === 'all') return queries;
     return queries.filter(q => q.purpose_type === purposeTypeFilter);
   }, [queries, purposeTypeFilter]);
+
+  const dashboardFolders = useMemo(() =>
+    projects.filter(p => p.type === 'dashboards'),
+    [projects]
+  );
+
+  const handleOpenCreateDashboard = (query: Query) => {
+    setCreateDashboardQueryId(query.id);
+    setCreateDashboardName(query.name);
+    setCreateDashboardFolderId(dashboardFolders.length > 0 ? dashboardFolders[0].id : '');
+    setCreateDashboardError('');
+    setShowNewFolderInline(false);
+    setNewFolderName('');
+    setNewFolderColor('#3B82F6');
+    setDashboardCreatedId(null);
+    setShowCreateDashboard(true);
+  };
+
+  const handleCloseCreateDashboard = () => {
+    setShowCreateDashboard(false);
+    setCreateDashboardQueryId(null);
+    setCreateDashboardName('');
+    setCreateDashboardFolderId('');
+    setCreateDashboardError('');
+    setShowNewFolderInline(false);
+    setDashboardCreatedId(null);
+  };
+
+  const handleCreateDashboardSubmit = async () => {
+    const trimmedName = createDashboardName.trim();
+    if (!trimmedName) {
+      setCreateDashboardError('Dashboard name is required');
+      return;
+    }
+    if (!activeCompany || !user) {
+      setCreateDashboardError('Not authenticated');
+      return;
+    }
+
+    setCreatingDashboard(true);
+    setCreateDashboardError('');
+
+    let targetFolderId = createDashboardFolderId;
+
+    if (showNewFolderInline) {
+      const folderName = newFolderName.trim();
+      if (!folderName) {
+        setCreateDashboardError('Folder name is required');
+        setCreatingDashboard(false);
+        return;
+      }
+      const folderResult = await createProject(folderName, newFolderColor, 'dashboards');
+      if (folderResult.error) {
+        setCreateDashboardError(folderResult.error);
+        setCreatingDashboard(false);
+        return;
+      }
+      targetFolderId = folderResult.data!.id;
+    }
+
+    if (!targetFolderId) {
+      setCreateDashboardError('Please select a folder or create a new one');
+      setCreatingDashboard(false);
+      return;
+    }
+
+    const dashResult = await createDashboard(trimmedName, targetFolderId);
+    if (dashResult.error) {
+      setCreateDashboardError(dashResult.error);
+      setCreatingDashboard(false);
+      return;
+    }
+
+    const newDashboardId = dashResult.data!.id;
+
+    const { error: cellError } = await supabase
+      .from('dashboard_cells')
+      .insert({
+        dashboard_id: newDashboardId,
+        query_id: createDashboardQueryId,
+        title: '',
+        row_index: 0,
+        col_index: 0,
+        row_span: 1,
+        col_span: 1,
+        width_percent: 100,
+        height_percent: 100,
+        enable_row_selection: false,
+        check_drilldown_existence: false,
+        show_parameters_in_header: false,
+        auto_group_by_column: null,
+        auto_group_collapsed: false,
+        settings: {}
+      });
+
+    if (cellError) {
+      setCreateDashboardError(cellError.message);
+      setCreatingDashboard(false);
+      return;
+    }
+
+    setCreatingDashboard(false);
+    setDashboardCreatedId(newDashboardId);
+  };
 
   const handleCreate = (type: QueryType) => {
     setSelectedType(type);
@@ -849,6 +972,15 @@ export default function QueryManager() {
                           >
                             <Copy className="w-4 h-4" />
                           </button>
+                          {query.purpose_type === 'query' && (
+                            <button
+                              onClick={() => handleOpenCreateDashboard(query)}
+                              className="p-1 text-gray-500 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 rounded transition-colors"
+                              title="Create Dashboard"
+                            >
+                              <LayoutDashboard className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleEdit(query)}
                             className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
@@ -1249,6 +1381,141 @@ export default function QueryManager() {
           onImport={handleImportExecutables}
         />
       )}
+
+      <Modal
+        isOpen={showCreateDashboard}
+        onClose={handleCloseCreateDashboard}
+        title="Create Dashboard from Query"
+        size="md"
+      >
+        {dashboardCreatedId ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <p className="text-sm text-green-700 dark:text-green-300">
+                Dashboard created successfully.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={handleCloseCreateDashboard}>
+                Close
+              </Button>
+              <Button onClick={() => {
+                handleCloseCreateDashboard();
+                window.location.href = `/dashboard/${dashboardCreatedId}`;
+              }}>
+                <LayoutDashboard className="w-4 h-4" />
+                Open Dashboard
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Create a new dashboard with a single cell linked to this query.
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Dashboard Name
+              </label>
+              <input
+                type="text"
+                value={createDashboardName}
+                onChange={(e) => {
+                  setCreateDashboardName(e.target.value);
+                  setCreateDashboardError('');
+                }}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-black dark:bg-gray-700 dark:text-white"
+                placeholder="Enter dashboard name"
+                autoFocus
+              />
+            </div>
+
+            {!showNewFolderInline ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Folder
+                </label>
+                {dashboardFolders.length > 0 ? (
+                  <CustomDropdown
+                    value={createDashboardFolderId}
+                    onChange={(val) => setCreateDashboardFolderId(val)}
+                    options={dashboardFolders.map(f => ({ value: f.id, label: f.name }))}
+                    placeholder="Select a folder..."
+                  />
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                    No folders exist yet. Create one below.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNewFolderInline(true)}
+                  className="mt-2 flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  Create new folder
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">New Folder</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewFolderInline(false)}
+                    className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  >
+                    Use existing
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-black dark:bg-gray-700 dark:text-white"
+                  placeholder="Folder name"
+                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                    Color
+                  </label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {FOLDER_COLORS.map(color => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setNewFolderColor(color)}
+                        className={`w-6 h-6 rounded-full border-2 transition-all ${
+                          newFolderColor === color
+                            ? 'border-gray-900 dark:border-white scale-110'
+                            : 'border-transparent hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {createDashboardError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{createDashboardError}</p>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={handleCloseCreateDashboard}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateDashboardSubmit} loading={creatingDashboard}>
+                <LayoutDashboard className="w-4 h-4" />
+                Create Dashboard
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       </div>
     </div>
   );
