@@ -233,7 +233,7 @@ export default function QueryManager() {
 
     console.log('[QueryManager.handleSave] Saving query:', { editing: !!editingQuery, data });
 
-    let result: { error?: string | null } | undefined;
+    let result: { error?: string | null; data?: Query } | undefined;
 
     if (editingQuery) {
       result = await updateQuery(editingQuery.id, data);
@@ -252,6 +252,20 @@ export default function QueryManager() {
 
     setShowModal(false);
     setEditingQuery(null);
+
+    // For new queries with purpose_type 'query', offer to create a dashboard
+    if (!editingQuery && result?.data && (data.purpose_type === 'query' || !data.purpose_type)) {
+      const newQuery = result.data as Query;
+      setCreateDashboardQueryId(newQuery.id);
+      setCreateDashboardName(newQuery.name);
+      setCreateDashboardFolderId(dashboardFolders.length > 0 ? dashboardFolders[0].id : '');
+      setCreateDashboardError('');
+      setShowNewFolderInline(false);
+      setNewFolderName('');
+      setNewFolderColor('#3B82F6');
+      setDashboardCreatedId(null);
+      setShowCreateDashboard(true);
+    }
   };
 
   const handleDelete = async (id: string) => {
