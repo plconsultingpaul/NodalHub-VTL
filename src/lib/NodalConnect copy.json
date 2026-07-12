@@ -1,0 +1,1595 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NodalConnect API",
+    "description": "REST API Documentation for NodalConnect",
+    "version": "1.1.06"
+  },
+  "servers": [
+    {
+      "url": "https://nodal.prioritylogisticsinc.com:8083/jdata",
+      "description": "Generated server url"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Execute",
+      "description": "Run executables and check database connectivity"
+    },
+    {
+      "name": "Manage",
+      "description": "Manage executables from via REST endpoints, Requires ADMIN key"
+    },
+    {
+      "name": "Validate",
+      "description": "Validate executable requests before running them"
+    }
+  ],
+  "paths": {
+    "/executables/manage/{name}": {
+      "get": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Get executable",
+        "description": "Returns a single executable object with HATEOAS links",
+        "operationId": "getExecutable",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Update executable",
+        "description": "Makes changes to an existing executable object and returns it with HATEOAS links",
+        "operationId": "updateExecutable",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExecutableDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Delete executable",
+        "description": "Deletes an executable object",
+        "operationId": "deleteExecutable",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/{name}/detect-result-columns": {
+      "put": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Detect and update result columns",
+        "description": "Detects result columns for an existing executable and saves them, fully replacing any existing result column definition. For executables with parameters, provide test values in the request body as key-value pairs.",
+        "operationId": "detectAndUpdateResultColumns",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestInputs"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/{name}/detect-params": {
+      "put": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Detect and update parameters",
+        "description": "Detects parameters for an existing executable and saves them, fully replacing any existing parameter definition",
+        "operationId": "detectAndUpdateParams",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/validate": {
+      "post": {
+        "tags": [
+          "Validate"
+        ],
+        "summary": "Validate execution request",
+        "description": "Validates parameters and configuration without executing. Send inputs as a JSON object for single validation, or as a JSON array for batch validation.",
+        "operationId": "validateExecution",
+        "requestBody": {
+          "description": "Validation request with executable name and input parameters",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteRequest"
+              },
+              "examples": {
+                "Single validation": {
+                  "summary": "Validate a single set of parameters",
+                  "description": "Single validation",
+                  "value": {
+                    "name": "getTripDetails",
+                    "inputs": {
+                      "IDLID": 12345
+                    }
+                  }
+                },
+                "Batch validation": {
+                  "summary": "Validate multiple sets of parameters",
+                  "description": "Batch validation",
+                  "value": {
+                    "name": "getTripDetails",
+                    "inputs": [
+                      {
+                        "IDLID": 12345
+                      },
+                      {
+                        "IDLID": 67890
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Validation completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ValidationResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BatchValidationResult"
+                    }
+                  ]
+                },
+                "examples": {
+                  "Single validation response": {
+                    "summary": "Response when inputs is a JSON object",
+                    "description": "Single validation response",
+                    "value": {
+                      "valid": true,
+                      "executableName": "getTripDetails",
+                      "schema": "MYSCHEMA",
+                      "procedure": "HFS_GET_TRIP_DETAIL",
+                      "validatedInputs": {
+                        "IDLID": 12345
+                      },
+                      "parameterDefinitions": [
+                        {
+                          "name": "IDLID",
+                          "mode": "IN",
+                          "type": "INTEGER",
+                          "length": null,
+                          "required": true
+                        }
+                      ],
+                      "message": "All validations passed. Ready for execution."
+                    }
+                  },
+                  "Batch validation response": {
+                    "summary": "Response when inputs is a JSON array",
+                    "description": "Batch validation response",
+                    "value": {
+                      "valid": true,
+                      "executableName": "getTripDetails",
+                      "totalItems": 2,
+                      "validCount": 2,
+                      "invalidCount": 0,
+                      "results": [
+                        {
+                          "index": 0,
+                          "valid": true,
+                          "validatedInputs": {
+                            "IDLID": 12345
+                          },
+                          "error": null
+                        },
+                        {
+                          "index": 1,
+                          "valid": true,
+                          "validatedInputs": {
+                            "IDLID": 67890
+                          },
+                          "error": null
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or request format",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Executable not found or inactive",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/run": {
+      "post": {
+        "tags": [
+          "Execute"
+        ],
+        "summary": "Run executable",
+        "description": "Executes a stored procedure or SQL query. Send inputs as a JSON object for single execution, or as a JSON array of objects for batch execution. The response schema differs accordingly.",
+        "operationId": "run",
+        "requestBody": {
+          "description": "Execution request with executable name and input parameters",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteRequest"
+              },
+              "examples": {
+                "Single execution": {
+                  "summary": "Execute once with a single set of parameters",
+                  "description": "Single execution",
+                  "value": {
+                    "name": "getTripDetails",
+                    "inputs": {
+                      "IDLID": 12345
+                    }
+                  }
+                },
+                "Batch execution": {
+                  "summary": "Execute multiple times with an array of parameter sets",
+                  "description": "Batch execution",
+                  "value": {
+                    "name": "getTripDetails",
+                    "inputs": [
+                      {
+                        "IDLID": 12345
+                      },
+                      {
+                        "IDLID": 67890
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Execution completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ExecutionResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BatchExecutionResult"
+                    }
+                  ]
+                },
+                "examples": {
+                  "Single execution response": {
+                    "summary": "Response when inputs is a JSON object",
+                    "description": "Single execution response",
+                    "value": {
+                      "executableCode": "getTripDetails",
+                      "outParams": {
+
+                      },
+                      "rows": [
+                        {
+                          "TRIP_ID": 12345,
+                          "STATUS": "ACTIVE"
+                        }
+                      ]
+                    }
+                  },
+                  "Batch execution response": {
+                    "summary": "Response when inputs is a JSON array",
+                    "description": "Batch execution response",
+                    "value": {
+                      "executableCode": "getTripDetails",
+                      "totalRequests": 2,
+                      "successCount": 2,
+                      "failureCount": 0,
+                      "results": [
+                        {
+                          "index": 0,
+                          "success": true,
+                          "result": {
+                            "executableCode": "getTripDetails",
+                            "outParams": {
+
+                            },
+                            "rows": [
+                              {
+                                "TRIP_ID": 12345,
+                                "STATUS": "ACTIVE"
+                              }
+                            ]
+                          },
+                          "error": null
+                        },
+                        {
+                          "index": 1,
+                          "success": true,
+                          "result": {
+                            "executableCode": "getTripDetails",
+                            "outParams": {
+
+                            },
+                            "rows": [
+                              {
+                                "TRIP_ID": 67890,
+                                "STATUS": "COMPLETED"
+                              }
+                            ]
+                          },
+                          "error": null
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or request format",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key does not have permission to execute this executable",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Executable not found or inactive",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage": {
+      "get": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "List executables",
+        "description": "Returns paginated HAL response with _embedded executables and pagination _links",
+        "operationId": "listExecutables",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "db",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedModelEntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Create executable",
+        "description": "Creates an executable object and returns it with HATEOAS links",
+        "operationId": "createExecutable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExecutableDefinitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/detect-result-columns": {
+      "post": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Detect result columns",
+        "description": "Executes an executable and detects the result columns from the output",
+        "operationId": "detectResultColumns",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetectResultColumnsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetectResultColumnsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/detect-params": {
+      "post": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Detect parameters",
+        "description": "Detects parameters used in an executable",
+        "operationId": "detectParameters",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetectParamsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetectParamsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/{name}/sample": {
+      "get": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "Get sample request/response",
+        "description": "Returns generated sample request and response bodies for an executable",
+        "operationId": "getSample",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutableSampleResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/manage/samples": {
+      "get": {
+        "tags": [
+          "Manage"
+        ],
+        "summary": "List sample request/response bodies",
+        "description": "Returns generated sample bodies for all active executables",
+        "operationId": "listSamples",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "db",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecutableSampleResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/executables/db-timestamp": {
+      "get": {
+        "tags": [
+          "Execute"
+        ],
+        "summary": "Get database timestamp",
+        "description": "Returns the current timestamp from the database server",
+        "operationId": "getDbTimestamp",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UpdateExecutableDefinitionRequest": {
+        "type": "object",
+        "description": "Request used to update executables.",
+        "properties": {
+          "procName": {
+            "type": "string",
+            "description": "Stored Procedure Name",
+            "example": "HFS_GET_TRIP_DETAIL",
+            "maxLength": 128,
+            "minLength": 0
+          },
+          "paramDefinition": {
+            "type": "string",
+            "default": [],
+            "description": "JSON parameter definition for this executable",
+            "example": [
+              {
+                "name": "IDLID",
+                "mode": "IN",
+                "type": "INTEGER",
+                "required": true
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the executable should be active",
+            "example": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of executable function",
+            "example": "Returns a list of active trips",
+            "maxLength": 500,
+            "minLength": 0
+          },
+          "executableType": {
+            "type": "string",
+            "description": "Type of Executable",
+            "enum": [
+              "STORED_PROCEDURE",
+              "SQL_QUERY"
+            ],
+            "example": "STORED_PROCEDURE"
+          },
+          "sqlQueryText": {
+            "type": "string",
+            "description": "SQL Query Text to Execute",
+            "example": "SELECT * FROM TLORDER WHERE BILL_TO_CODE = :BILL_TO_CODE LIMIT 10"
+          },
+          "dbConnectionId": {
+            "type": "string",
+            "description": "Database connection name or ID",
+            "example": "TMWDEV"
+          },
+          "maxBatchSize": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum size for batches, Leave empty to disable",
+            "example": 100,
+            "minimum": 1
+          }
+        }
+      },
+      "EntityModelExecutableDefinition": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "procName": {
+            "type": "string"
+          },
+          "paramDefinition": {
+            "type": "string"
+          },
+          "active": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "executableType": {
+            "type": "string"
+          },
+          "sqlQueryText": {
+            "type": "string"
+          },
+          "dbConnectionId": {
+            "type": "string"
+          },
+          "dbConnectionName": {
+            "type": "string"
+          },
+          "maxBatchSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "resultColumns": {
+            "type": "string"
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        }
+      },
+      "RequestInputs": {
+        "type": "object",
+        "description": "Input parameters as key-value pairs",
+        "example": {
+          "IDLID": 186211
+        },
+        "properties": {
+          "empty": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExecuteRequest": {
+        "type": "object",
+        "description": "Request to execute or validate a configured executable",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the executable to run",
+            "example": "getTripDetails",
+            "minLength": 1
+          },
+          "inputs": {
+
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ParamDef": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "length": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ValidationResult": {
+        "type": "object",
+        "description": "Result of validating an execution request",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "Whether the validation passed",
+            "example": true
+          },
+          "executableName": {
+            "type": "string",
+            "description": "Name of the executable being validated",
+            "example": "getTripDetails"
+          },
+          "schema": {
+            "type": "string",
+            "description": "Database schema name",
+            "example": "MYSCHEMA"
+          },
+          "procedure": {
+            "type": "string",
+            "description": "Stored procedure name",
+            "example": "HFS_GET_TRIP_DETAIL"
+          },
+          "validatedInputs": {
+            "type": "object",
+            "additionalProperties": {
+
+            },
+            "description": "Validated and coerced input parameters"
+          },
+          "parameterDefinitions": {
+            "type": "array",
+            "description": "Parameter definitions for this executable",
+            "items": {
+              "$ref": "#/components/schemas/ParamDef"
+            }
+          },
+          "message": {
+            "type": "string",
+            "description": "Validation result message",
+            "example": "All validations passed. Ready for execution."
+          }
+        }
+      },
+      "BatchValidationItem": {
+        "type": "object",
+        "description": "Validation result for a single item within a batch",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based index of this item in the batch",
+            "example": 0
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "Whether this item passed validation",
+            "example": true
+          },
+          "validatedInputs": {
+            "$ref": "#/components/schemas/RequestInputs",
+            "description": "Validated and coerced input parameters, null if validation failed"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if validation failed, null if successful"
+          }
+        }
+      },
+      "BatchValidationResult": {
+        "type": "object",
+        "description": "Result of validating a batch execution request",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "Whether all items in the batch passed validation",
+            "example": true
+          },
+          "executableName": {
+            "type": "string",
+            "description": "Name of the executable being validated",
+            "example": "getTripDetails"
+          },
+          "totalItems": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Total number of items validated",
+            "example": 2
+          },
+          "validCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of items that passed validation",
+            "example": 2
+          },
+          "invalidCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of items that failed validation",
+            "example": 0
+          },
+          "results": {
+            "type": "array",
+            "description": "Individual validation results for each item in the batch",
+            "items": {
+              "$ref": "#/components/schemas/BatchValidationItem"
+            }
+          }
+        }
+      },
+      "ExecutionResult": {
+        "type": "object",
+        "description": "Result of executing a stored procedure or SQL query",
+        "properties": {
+          "executableCode": {
+            "type": "string",
+            "description": "Name of the executed executable",
+            "example": "getTripDetails"
+          },
+          "outParams": {
+            "type": "object",
+            "additionalProperties": {
+
+            },
+            "description": "Output parameters returned by the stored procedure"
+          },
+          "rows": {
+            "type": "array",
+            "description": "Result set rows returned by the execution",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+
+              }
+            }
+          }
+        }
+      },
+      "BatchExecutionResult": {
+        "type": "object",
+        "description": "Result of a batch execution containing individual item results",
+        "properties": {
+          "executableCode": {
+            "type": "string",
+            "description": "Name of the executed executable",
+            "example": "getTripDetails"
+          },
+          "totalRequests": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Total number of requests in the batch",
+            "example": 10
+          },
+          "successCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of successful executions",
+            "example": 8
+          },
+          "failureCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of failed executions",
+            "example": 2
+          },
+          "results": {
+            "type": "array",
+            "description": "Individual results for each item in the batch",
+            "items": {
+              "$ref": "#/components/schemas/BatchItemResult"
+            }
+          }
+        }
+      },
+      "BatchItemResult": {
+        "type": "object",
+        "description": "Result of a single item within a batch execution",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based index of this item in the batch",
+            "example": 0
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether this item executed successfully",
+            "example": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/ExecutionResult",
+            "description": "Execution result if successful, null if failed"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if failed, null if successful"
+          }
+        }
+      },
+      "CreateExecutableDefinitionRequest": {
+        "type": "object",
+        "description": "Request used to create executables.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique name for the Executable",
+            "example": "getTripDetails",
+            "maxLength": 100,
+            "minLength": 0
+          },
+          "procName": {
+            "type": "string",
+            "description": "Stored Procedure Name",
+            "example": "HFS_GET_TRIP_DETAIL",
+            "maxLength": 128,
+            "minLength": 0
+          },
+          "paramDefinition": {
+            "type": "string",
+            "default": [],
+            "description": "JSON parameter definition for this executable",
+            "example": [
+              {
+                "name": "IDLID",
+                "mode": "IN",
+                "type": "INTEGER",
+                "required": true
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the executable should be active",
+            "example": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of executable function",
+            "example": "Returns a list of active trips",
+            "maxLength": 500,
+            "minLength": 0
+          },
+          "executableType": {
+            "type": "string",
+            "description": "Type of Executable",
+            "enum": [
+              "STORED_PROCEDURE",
+              "SQL_QUERY"
+            ],
+            "example": "STORED_PROCEDURE",
+            "minLength": 1
+          },
+          "sqlQueryText": {
+            "type": "string",
+            "description": "SQL Query Text to Execute",
+            "example": "SELECT * FROM TLORDER WHERE BILL_TO_CODE = :BILL_TO_CODE LIMIT 10"
+          },
+          "dbConnectionId": {
+            "type": "string",
+            "description": "Database connection name or ID",
+            "example": "TMWDEV",
+            "minLength": 1
+          },
+          "maxBatchSize": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum size for batches, Leave empty to disable",
+            "example": 100,
+            "minimum": 1
+          }
+        },
+        "required": [
+          "dbConnectionId",
+          "executableType",
+          "name"
+        ]
+      },
+      "DetectResultColumnsRequest": {
+        "type": "object",
+        "properties": {
+          "executableType": {
+            "type": "string"
+          },
+          "sqlQueryText": {
+            "type": "string"
+          },
+          "procName": {
+            "type": "string"
+          },
+          "dbConnectionId": {
+            "type": "string"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/RequestInputs"
+          }
+        }
+      },
+      "DetectResultColumnsResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResultColumnDef"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ResultColumnDef": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "DetectParamsRequest": {
+        "type": "object",
+        "properties": {
+          "executableType": {
+            "type": "string"
+          },
+          "sqlQueryText": {
+            "type": "string"
+          },
+          "procName": {
+            "type": "string"
+          },
+          "dbConnectionId": {
+            "type": "string"
+          }
+        }
+      },
+      "DetectParamsResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DetectedParameter"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "DetectedParameter": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "suggestedType": {
+            "type": "string"
+          },
+          "dbType": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "PageMetadata": {
+        "type": "object",
+        "properties": {
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "PagedModelEntityModelExecutableDefinition": {
+        "type": "object",
+        "properties": {
+          "_embedded": {
+            "type": "object",
+            "properties": {
+              "executableDefinitionList": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/EntityModelExecutableDefinition"
+                }
+              }
+            }
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageMetadata"
+          }
+        }
+      },
+      "ExecutableSampleResponse": {
+        "type": "object",
+        "description": "Generated sample request and response bodies for an executable",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Executable name",
+            "example": "getTripDetails"
+          },
+          "description": {
+            "type": "string",
+            "description": "Executable description",
+            "example": "Get trip details by DLID"
+          },
+          "executableType": {
+            "type": "string",
+            "description": "Executable type",
+            "example": "STORED_PROCEDURE"
+          },
+          "batchEnabled": {
+            "type": "boolean",
+            "description": "Whether batch execution is enabled",
+            "example": true
+          },
+          "maxBatchSize": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum batch size, null or 0 if batch disabled",
+            "example": 50
+          },
+          "parameterDefinitions": {
+            "type": "array",
+            "description": "Parsed parameter definitions",
+            "items": {
+              "$ref": "#/components/schemas/ParamDef"
+            }
+          },
+          "singleRequest": {
+            "type": "object",
+            "additionalProperties": {
+
+            },
+            "description": "Sample single-mode request body"
+          },
+          "batchRequest": {
+            "type": "object",
+            "additionalProperties": {
+
+            },
+            "description": "Sample batch-mode request body, null if batch disabled"
+          },
+          "singleResponse": {
+            "$ref": "#/components/schemas/ExecutionResult",
+            "description": "Sample single-mode response body"
+          },
+          "batchResponse": {
+            "$ref": "#/components/schemas/BatchExecutionResult",
+            "description": "Sample batch-mode response body, null if batch disabled"
+          }
+        }
+      },
+      "Link": {
+        "type": "object",
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "hreflang": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "deprecation": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "templated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Links": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/Link"
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "description": "Enter your API key in the X-API-Key header",
+        "name": "X-API-Key",
+        "in": "header"
+      },
+      "bearer": {
+        "type": "http",
+        "description": "Enter your API key as a Bearer token",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

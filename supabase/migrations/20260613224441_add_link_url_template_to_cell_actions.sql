@@ -1,0 +1,1 @@
+ALTER TABLE dashboard_cell_actions ADD COLUMN IF NOT EXISTS link_url_template text;

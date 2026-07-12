@@ -1,0 +1,1 @@
+ALTER TABLE dashboard_cells ADD COLUMN IF NOT EXISTS show_parameters_in_header boolean NOT NULL DEFAULT false;
