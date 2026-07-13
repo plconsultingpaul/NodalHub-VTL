@@ -173,7 +173,7 @@ export default function QueryManager() {
       .insert({
         dashboard_id: newDashboardId,
         query_id: createDashboardQueryId,
-        title: '',
+        title: createDashboardName.trim(),
         row_index: 0,
         col_index: 0,
         row_span: 1,
