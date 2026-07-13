@@ -129,7 +129,7 @@ export default function NodalConnectQueryForm({
       };
 
       if (queryType === 'sql') {
-        body.sqlQueryText = sqlText;
+        body.sqlQueryText = sqlText.replace(/@(\w+)/g, ':$1');
       } else {
         body.procName = procName;
       }
@@ -220,7 +220,7 @@ export default function NodalConnectQueryForm({
       dbConnectionId: dbConnectionId,
     };
     if (queryType === 'sql') {
-      ncBody.sqlQueryText = sqlText;
+      ncBody.sqlQueryText = sqlText.replace(/@(\w+)/g, ':$1');
     } else {
       ncBody.procName = procName;
     }
@@ -317,7 +317,7 @@ export default function NodalConnectQueryForm({
           name: queryName,
           executableType: queryType === 'sql' ? 'SQL_QUERY' : 'STORED_PROCEDURE',
           dbConnectionId: dbConnectionId,
-          ...(queryType === 'sql' ? { sqlQueryText: sqlText } : { procName }),
+          ...(queryType === 'sql' ? { sqlQueryText: sqlText.replace(/@(\w+)/g, ':$1') } : { procName }),
         };
       } else {
         url = `${endpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(queryName)}/detect-result-columns`;
