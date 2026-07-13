@@ -2055,9 +2055,25 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     const showCalculationsIcon = currentFormattingRules.showCalculationsIcon !== false;
     const showFilterInput = currentFormattingRules.showFilterInput !== false;
 
+    console.log('[ConditionalFormatting] Rules loaded, targets:', conditionalFormatting.length);
+    conditionalFormatting.forEach(cf => {
+      console.log(`[ConditionalFormatting] Target: "${cf.target}", Rules: ${cf.rules.length}`);
+      cf.rules.forEach(rule => {
+        console.log(`[ConditionalFormatting]   Rule "${rule.name}" enabled=${rule.enabled}, conditions:`, rule.conditions.map(c => `"${c.column}" ${c.comparison} "${c.value}"`));
+        console.log(`[ConditionalFormatting]   Formatting:`, JSON.stringify(rule.formatting));
+      });
+    });
+
+    let conditionLogCount = 0;
     const evaluateCondition = (condition: ConditionalFormattingCondition, rowData: Record<string, unknown>): boolean => {
       const cellValue = rowData[condition.column];
       const compareValue = condition.value;
+
+      if (conditionLogCount < 5) {
+        conditionLogCount++;
+        console.log(`[ConditionalFormatting] evaluateCondition: column="${condition.column}", cellValue="${cellValue}" (type: ${typeof cellValue}), compareValue="${compareValue}", comparison="${condition.comparison}", dataType="${condition.dataType}"`);
+        console.log(`[ConditionalFormatting]   rowData keys:`, Object.keys(rowData).map(k => `"${k}"`));
+      }
 
       if (condition.comparison === 'Is Null or Empty') {
         return cellValue === null || cellValue === undefined || cellValue === '';
@@ -2133,8 +2149,13 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
     };
 
+    let findRuleLogCount = 0;
     const findMatchingRule = (target: string, rowData: Record<string, unknown>): ConditionalFormattingRule | null => {
       const targetFormatting = conditionalFormatting.find(cf => cf.target === target);
+      if (findRuleLogCount < 3) {
+        findRuleLogCount++;
+        console.log(`[ConditionalFormatting] findMatchingRule: target="${target}", found=${!!targetFormatting}, available targets:`, conditionalFormatting.map(cf => `"${cf.target}"`));
+      }
       if (!targetFormatting) return null;
 
       const sortedRules = [...targetFormatting.rules].sort((a, b) => a.sequence - b.sequence);
@@ -2173,11 +2194,17 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
     };
 
+    let formatterLogCount = 0;
     const buildCellFormatter = (field: string): Tabulator.Formatter | undefined => {
       const colFormatting = columnFormattings[field] || {};
       const hasGridFormatting = Object.keys(gridFormatting).some(k => gridFormatting[k as keyof GridColumnFormatting]);
       const hasColFormatting = Object.keys(colFormatting).some(k => colFormatting[k as keyof GridColumnFormatting]);
       const hasConditional = conditionalFormatting.length > 0;
+
+      if (formatterLogCount < 3) {
+        formatterLogCount++;
+        console.log(`[ConditionalFormatting] buildCellFormatter: field="${field}", hasGridFormatting=${hasGridFormatting}, hasColFormatting=${hasColFormatting}, hasConditional=${hasConditional}`);
+      }
 
       if (!hasGridFormatting && !hasColFormatting && !hasConditional) return undefined;
 
