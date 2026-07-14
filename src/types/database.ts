@@ -149,6 +149,7 @@ export interface Database {
           created_by: string | null;
           created_at: string;
           updated_at: string;
+          auto_refresh_minutes: number | null;
         };
         Insert: {
           id?: string;
@@ -158,6 +159,7 @@ export interface Database {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          auto_refresh_minutes?: number | null;
         };
         Update: {
           id?: string;
@@ -167,6 +169,7 @@ export interface Database {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          auto_refresh_minutes?: number | null;
         };
       };
       api_endpoints: {
@@ -458,6 +461,8 @@ export interface Database {
           nodal_db_connection_id: string | null;
           sql_query_text: string | null;
           proc_name: string | null;
+          lookup_value_field: string | null;
+          lookup_label_field: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -484,6 +489,8 @@ export interface Database {
           nodal_db_connection_id?: string | null;
           sql_query_text?: string | null;
           proc_name?: string | null;
+          lookup_value_field?: string | null;
+          lookup_label_field?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -510,6 +517,8 @@ export interface Database {
           nodal_db_connection_id?: string | null;
           sql_query_text?: string | null;
           proc_name?: string | null;
+          lookup_value_field?: string | null;
+          lookup_label_field?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -627,6 +636,8 @@ export interface Database {
           link_url_template: string | null;
           post_action_pulse_id: string | null;
           pulse_variable_mappings: Json;
+          prompt_title: string | null;
+          prompt_description: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -644,6 +655,8 @@ export interface Database {
           link_url_template?: string | null;
           post_action_pulse_id?: string | null;
           pulse_variable_mappings?: Json;
+          prompt_title?: string | null;
+          prompt_description?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -661,6 +674,8 @@ export interface Database {
           link_url_template?: string | null;
           post_action_pulse_id?: string | null;
           pulse_variable_mappings?: Json;
+          prompt_title?: string | null;
+          prompt_description?: string | null;
           created_at?: string;
           updated_at?: string;
         };
