@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import CustomDropdown from '../../components/ui/CustomDropdown';
@@ -37,12 +37,15 @@ const SIGMA_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="no
 const SORT_ASC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14l5-5 5 5H7z"/></svg>`;
 const SORT_DESC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5H7z"/></svg>`;
 
+const BLANK_SENTINEL = '__@@BLANK@@__';
+
 const columnFilterState: Map<string, Set<string>> = new Map();
 const columnAllValues: Map<string, string[]> = new Map();
 const columnTextFilterState: Map<string, string> = new Map();
 const columnFilterModeState: Map<string, string> = new Map();
 const columnCalcState: Map<string, Set<string>> = new Map();
 const columnSortState: Map<string, 'none' | 'asc' | 'desc'> = new Map();
+const columnCustomFilterRef: Map<string, (data: Record<string, unknown>) => boolean> = new Map();
 
 const FILTER_MODES = [
   { id: 'contains', label: 'Contains', short: 'C' },
@@ -476,14 +479,20 @@ function createTitleWithFilter(
 
   function getUniqueValues(): string[] {
     const values = new Set<string>();
+    let hasBlank = false;
     const tableData = table.getData();
     tableData.forEach((row: Record<string, unknown>) => {
       const val = row[field];
-      if (val !== null && val !== undefined && val !== '') {
+      if (val === null || val === undefined || val === '') {
+        hasBlank = true;
+      } else {
         values.add(String(val));
       }
     });
     const sorted = Array.from(values).sort((a, b) => a.localeCompare(b));
+    if (hasBlank) {
+      sorted.unshift(BLANK_SENTINEL);
+    }
     columnAllValues.set(field, sorted);
     return sorted;
   }
@@ -512,6 +521,14 @@ function createTitleWithFilter(
     const textFilterValue = columnTextFilterState.get(field) || '';
     const filterMode = columnFilterModeState.get(field) || 'contains';
 
+    // Remove any stored row-level custom filter for this field
+    const existingCustomFilter = columnCustomFilterRef.get(field);
+    if (existingCustomFilter) {
+      table.removeFilter(existingCustomFilter);
+      columnCustomFilterRef.delete(field);
+    }
+
+    // Remove field-based filters
     const currentFilters = table.getFilters(true) as Array<{ field: string; type: string; value: unknown }>;
     currentFilters.forEach(f => {
       if (f.field === field) {
@@ -520,7 +537,21 @@ function createTitleWithFilter(
     });
 
     if (selectedValues.size > 0 && selectedValues.size < allValues.length) {
-      table.addFilter(field, 'in', Array.from(selectedValues));
+      const includesBlank = selectedValues.has(BLANK_SENTINEL);
+      const realValues = Array.from(selectedValues).filter(v => v !== BLANK_SENTINEL);
+
+      if (!includesBlank && realValues.length > 0) {
+        table.addFilter(field, 'in', realValues);
+      } else {
+        const filterFunc = (data: Record<string, unknown>) => {
+          const cellValue = data[field];
+          const isBlank = cellValue === null || cellValue === undefined || cellValue === '';
+          if (isBlank) return includesBlank;
+          return realValues.includes(String(cellValue));
+        };
+        columnCustomFilterRef.set(field, filterFunc);
+        table.addFilter(filterFunc);
+      }
     }
 
     if (textFilterValue.trim()) {
@@ -589,7 +620,9 @@ function createTitleWithFilter(
     optionsList.appendChild(selectAllDiv);
 
     const filteredValues = filter
-      ? allValues.filter(v => v.toLowerCase().includes(filter.toLowerCase()))
+      ? allValues.filter(v => v === BLANK_SENTINEL
+          ? '(blank)'.includes(filter.toLowerCase())
+          : v.toLowerCase().includes(filter.toLowerCase()))
       : allValues;
 
     filteredValues.forEach(value => {
@@ -604,8 +637,13 @@ function createTitleWithFilter(
       checkbox.style.cssText = 'cursor:pointer;';
 
       const label = document.createElement('span');
-      label.textContent = value;
-      label.style.cssText = 'font-size:12px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      if (value === BLANK_SENTINEL) {
+        label.textContent = '(Blank)';
+        label.style.cssText = 'font-size:12px;color:#9ca3af;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      } else {
+        label.textContent = value;
+        label.style.cssText = 'font-size:12px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      }
 
       optionDiv.appendChild(checkbox);
       optionDiv.appendChild(label);
@@ -693,6 +731,13 @@ function createTitleWithFilter(
     textFilterInput.value = '';
     modeButton.textContent = 'C';
     modeButton.title = 'Contains';
+    // Remove stored row-level custom filter
+    const existingCustomFilter = columnCustomFilterRef.get(field);
+    if (existingCustomFilter) {
+      table.removeFilter(existingCustomFilter);
+      columnCustomFilterRef.delete(field);
+    }
+    // Remove field-based filters
     const currentFilters = table.getFilters(true) as Array<{ field: string; type: string; value: unknown }>;
     currentFilters.forEach(f => {
       if (f.field === field) {
@@ -898,7 +943,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   const [calcUpdateTrigger, setCalcUpdateTrigger] = useState(0);
   const [drilldownAvailability, setDrilldownAvailability] = useState<Set<number>>(new Set());
   const [cellActions, setCellActions] = useState<DashboardCellActionWithQuery[]>([]);
-  const { resolveLookup, getLookupState } = useLookupResolver();
+  const { resolveLookup, resolveLookupByQueryId, getLookupState, getLookupStateByQueryId } = useLookupResolver();
   const { fixedValues } = useFixedValues();
   const [promptDialog, setPromptDialog] = useState<{
     action: DashboardCellActionWithQuery;
@@ -907,6 +952,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     rows: Record<string, unknown>[];
     onProgress?: ActionProgressCallback;
   } | null>(null);
+  const [cellProcessing, setCellProcessing] = useState<{ name: string; current: number; total: number } | null>(null);
   const drilldownTabulatorsRef = useRef<Map<string, { tabulator: Tabulator; container: HTMLElement }>>(new Map());
   const cellActionsRef = useRef(cellActions);
   cellActionsRef.current = cellActions;
@@ -951,12 +997,16 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
   useEffect(() => {
     if (!promptDialog) return;
-    const lookupMappings = promptDialog.mappings.filter(m => m.target === 'lookup' && m.fixedValueId);
+    const lookupMappings = promptDialog.mappings.filter(m => m.target === 'lookup');
     lookupMappings.forEach(m => {
-      const fv = fixedValues.find(f => f.id === m.fixedValueId);
-      if (fv) resolveLookup(fv);
+      if (m.lookupQueryId) {
+        resolveLookupByQueryId(m.lookupQueryId);
+      } else if (m.fixedValueId) {
+        const fv = fixedValues.find(f => f.id === m.fixedValueId);
+        if (fv) resolveLookup(fv);
+      }
     });
-  }, [promptDialog, fixedValues, resolveLookup]);
+  }, [promptDialog, fixedValues, resolveLookup, resolveLookupByQueryId]);
 
   const toggleRowRef = useRef<((rowIndex: number, rowData: RowData) => void) | null>(null);
   const columnChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2348,7 +2398,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           return;
         }
 
-        const result = await executeActionForRows(action, rows);
+        setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
+        const result = await executeActionForRows(action, rows, (current, total) => {
+          setCellProcessing({ name: action.display_name, current, total });
+        });
+        setCellProcessing(null);
 
         if (action.refresh_after_execute) {
           fetchDataRef.current?.();
@@ -2658,7 +2712,19 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       return;
     }
 
-    const result = await executeActionForRows(action, rows, onProgress, values);
+    const progressCallback: ActionProgressCallback = onProgress || ((current, total) => {
+      setCellProcessing({ name: action.display_name, current, total });
+    });
+
+    if (!onProgress) {
+      setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
+    }
+
+    const result = await executeActionForRows(action, rows, progressCallback, values);
+
+    if (!onProgress) {
+      setCellProcessing(null);
+    }
 
     if (action.refresh_after_execute) {
       fetchData();
@@ -2752,15 +2818,44 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         </div>
       )}
 
+      {cellProcessing && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl px-8 py-6 w-80 flex flex-col items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+              <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Processing Action
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {cellProcessing.name}
+              </p>
+            </div>
+            <div className="w-full">
+              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${cellProcessing.total > 0 ? (cellProcessing.current / cellProcessing.total) * 100 : 0}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
+                {cellProcessing.current} of {cellProcessing.total} row{cellProcessing.total !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {promptDialog && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-sm mx-4">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
-                Enter Parameter Values
+                {promptDialog.action.prompt_title || 'Enter Parameter Values'}
               </h4>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Provide values for the following parameters before executing.
+                {promptDialog.action.prompt_description || 'Provide values for the following parameters before executing.'}
               </p>
             </div>
             <div className="p-4 space-y-3">
@@ -2768,10 +2863,12 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                 const vt = m.valueType || 'text';
                 const inputType = vt === 'date' ? 'date' : vt === 'integer' || vt === 'double' ? 'number' : 'text';
                 const inputStep = vt === 'double' ? '0.01' : undefined;
-                const isLookupMapping = m.target === 'lookup' && m.fixedValueId;
+                const isLookupMapping = m.target === 'lookup' && (m.lookupQueryId || m.fixedValueId);
 
                 if (isLookupMapping) {
-                  const lookupState = getLookupState(m.fixedValueId!);
+                  const lookupState = m.lookupQueryId
+                    ? getLookupStateByQueryId(m.lookupQueryId)
+                    : getLookupState(m.fixedValueId!);
                   return (
                     <div key={m.parameterName}>
                       <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
