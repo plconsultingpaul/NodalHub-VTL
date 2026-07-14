@@ -88,6 +88,8 @@ export default function NodalConnectQueryForm({
   const [procName, setProcName] = useState(query?.proc_name || '');
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [lookupValueField, setLookupValueField] = useState(query?.lookup_value_field || '');
+  const [lookupLabelField, setLookupLabelField] = useState(query?.lookup_label_field || '');
   const [userParameters, setUserParameters] = useState<UserParameter[]>(
     (query?.user_parameters as UserParameter[]) || []
   );
@@ -103,6 +105,8 @@ export default function NodalConnectQueryForm({
       setDbConnectionId(query.nodal_db_connection_id || '');
       setSqlText(query.sql_query_text || '');
       setProcName(query.proc_name || '');
+      setLookupValueField(query.lookup_value_field || '');
+      setLookupLabelField(query.lookup_label_field || '');
       setUserParameters((query.user_parameters as UserParameter[]) || []);
     }
   }, [query]);
@@ -293,6 +297,8 @@ export default function NodalConnectQueryForm({
       api_endpoint_id: nodalEndpoint?.id || null,
       http_method: 'POST',
       api_sub_path: 'executables/run',
+      lookup_value_field: purposeType === 'lookup' ? (lookupValueField.trim() || null) : null,
+      lookup_label_field: purposeType === 'lookup' ? (lookupLabelField.trim() || null) : null,
     };
 
     await onSave(queryData);
@@ -408,6 +414,37 @@ export default function NodalConnectQueryForm({
             ]}
           />
         </div>
+
+        {purposeType === 'lookup' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Value Field
+              </label>
+              <input
+                type="text"
+                value={lookupValueField}
+                onChange={(e) => setLookupValueField(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                placeholder="e.g. id"
+              />
+              <p className="text-xs text-gray-500 mt-1">Column used as the selected value</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Label Field
+              </label>
+              <input
+                type="text"
+                value={lookupLabelField}
+                onChange={(e) => setLookupLabelField(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                placeholder="e.g. name"
+              />
+              <p className="text-xs text-gray-500 mt-1">Column shown to the user</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div>
