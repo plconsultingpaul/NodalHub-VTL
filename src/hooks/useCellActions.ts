@@ -40,6 +40,8 @@ export function useCellActions() {
       post_action_pulse_id?: string | null;
       pulse_variable_mappings?: PulseVariableMapping[];
       visibility_condition?: ActionVisibilityCondition | null;
+      prompt_title?: string;
+      prompt_description?: string;
     }>
   ): Promise<{ error: string | null }> => {
     setLoading(true);
@@ -78,6 +80,8 @@ export function useCellActions() {
           post_action_pulse_id: action.post_action_pulse_id || null,
           pulse_variable_mappings: action.pulse_variable_mappings || [],
           visibility_condition: action.visibility_condition || null,
+          prompt_title: action.prompt_title || null,
+          prompt_description: action.prompt_description || null,
         };
 
         if (action.id) {
