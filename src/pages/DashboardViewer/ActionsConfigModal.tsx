@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown } from 'lucide-react';
 import { useCellActions } from '../../hooks/useCellActions';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { usePulses } from '../../hooks/usePulses';
@@ -22,6 +22,8 @@ interface ActionConfig {
   post_action_pulse_id?: string | null;
   pulse_variable_mappings?: PulseVariableMapping[];
   visibility_condition?: ActionVisibilityCondition | null;
+  prompt_title?: string;
+  prompt_description?: string;
 }
 
 interface ActionsConfigModalProps {
@@ -49,11 +51,16 @@ export default function ActionsConfigModal({
   const [activeActionIndex, setActiveActionIndex] = useState<number | null>(null);
   const [activeParamName, setActiveParamName] = useState<string | null>(null);
   const templateTextareaRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
+  const [reorderMode, setReorderMode] = useState(false);
+  const dragItemRef = useRef<number | null>(null);
+  const dragOverItemRef = useRef<number | null>(null);
 
   const actionQueries = queries.filter(q => q.purpose_type === 'action');
+  const lookupQueries = queries.filter(q => q.purpose_type === 'lookup');
 
   useEffect(() => {
     if (!isOpen || !cellId) return;
+    setReorderMode(false);
 
     const load = async () => {
       setLoadingActions(true);
@@ -82,6 +89,8 @@ export default function ActionsConfigModal({
           post_action_pulse_id: a.post_action_pulse_id || null,
           pulse_variable_mappings: (a.pulse_variable_mappings as PulseVariableMapping[]) || [],
           visibility_condition: (a.visibility_condition as ActionVisibilityCondition) || null,
+          prompt_title: a.prompt_title || '',
+          prompt_description: a.prompt_description || '',
         };
       }));
       setLoadingActions(false);
@@ -189,10 +198,27 @@ export default function ActionsConfigModal({
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
   };
 
-  const handleMappingTargetChange = (actionIndex: number, paramName: string, target: 'column' | 'hardcode' | 'prompt') => {
+  const handleMappingTargetChange = (actionIndex: number, paramName: string, target: 'column' | 'hardcode' | 'prompt' | 'lookup') => {
     const action = actions[actionIndex];
     const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
-      m.parameterName === paramName ? { ...m, target, columnName: target === 'column' ? m.columnName : '', hardcodeValue: target === 'hardcode' ? (m.hardcodeValue || '') : '', valueType: target !== 'column' ? (m.valueType || 'text') : m.valueType } : m
+      m.parameterName === paramName ? {
+        ...m,
+        target,
+        columnName: target === 'column' ? m.columnName : '',
+        hardcodeValue: target === 'hardcode' ? (m.hardcodeValue || '') : '',
+        valueType: target !== 'column' ? (m.valueType || 'text') : m.valueType,
+        lookupQueryId: target === 'lookup' ? (m.lookupQueryId || '') : undefined,
+        fixedValueId: target === 'lookup' ? (m.fixedValueId || '') : undefined,
+        promptText: (target === 'prompt' || target === 'lookup') ? (m.promptText || '') : undefined,
+      } : m
+    );
+    handleUpdateAction(actionIndex, { parameter_mappings: updated });
+  };
+
+  const handleMappingLookupQueryChange = (actionIndex: number, paramName: string, lookupQueryId: string) => {
+    const action = actions[actionIndex];
+    const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
+      m.parameterName === paramName ? { ...m, lookupQueryId, fixedValueId: undefined } : m
     );
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
   };
@@ -335,6 +361,48 @@ export default function ActionsConfigModal({
               <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">
                 No actions configured. Add an action to enable right-click or button triggers on this cell.
               </p>
+            ) : reorderMode ? (
+              <div className="space-y-1 max-h-[60vh] overflow-y-auto pr-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Drag and drop to reorder actions. The order determines the display order in the context menu.
+                </p>
+                {actions.map((action, index) => (
+                  <div
+                    key={action.id || index}
+                    draggable
+                    onDragStart={() => { dragItemRef.current = index; }}
+                    onDragEnter={() => { dragOverItemRef.current = index; }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnd={() => {
+                      if (dragItemRef.current === null || dragOverItemRef.current === null) return;
+                      const reordered = [...actions];
+                      const [removed] = reordered.splice(dragItemRef.current, 1);
+                      reordered.splice(dragOverItemRef.current, 0, removed);
+                      setActions(reordered.map((a, i) => ({ ...a, sort_order: i })));
+                      dragItemRef.current = null;
+                      dragOverItemRef.current = null;
+                    }}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700/50 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm cursor-grab active:cursor-grabbing transition-all"
+                  >
+                    <GripVertical className="w-4 h-4 text-gray-400 shrink-0" />
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-5 text-center shrink-0">
+                      {index + 1}
+                    </span>
+                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                      action.action_type === 'popup'
+                        ? 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/30'
+                        : action.action_type === 'link'
+                          ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
+                          : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                    }`}>
+                      {action.action_type === 'popup' ? 'Popup' : action.action_type === 'link' ? 'Link' : 'Execute'}
+                    </span>
+                    <span className="text-sm text-gray-900 dark:text-white truncate">
+                      {action.display_name || '(unnamed)'}
+                    </span>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                 {actions.map((action, index) => {
@@ -648,13 +716,38 @@ export default function ActionsConfigModal({
                               })()}
                             </div>
 
+                            {/* Prompt Dialog Customization */}
+                            {(action.action_type === 'execute') && (
+                              <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                  Prompt Dialog <span className="font-normal text-gray-400">(optional)</span>
+                                </label>
+                                <div className="space-y-2">
+                                  <input
+                                    type="text"
+                                    value={action.prompt_title || ''}
+                                    onChange={(e) => handleUpdateAction(index, { prompt_title: e.target.value })}
+                                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    placeholder="Enter Parameter Values"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={action.prompt_description || ''}
+                                    onChange={(e) => handleUpdateAction(index, { prompt_description: e.target.value })}
+                                    className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    placeholder="Provide values for the following parameters before executing."
+                                  />
+                                </div>
+                              </div>
+                            )}
+
                             {userParams.length > 0 && (
                               <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                                   Parameter Mappings
                                 </label>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                                  Map each parameter to a column, hardcoded value, or user prompt.
+                                  Map each parameter to a column, hardcoded value, user prompt, or lookup dropdown.
                                 </p>
                                 <div className="space-y-2">
                                   {userParams.map(param => {
@@ -664,8 +757,8 @@ export default function ActionsConfigModal({
                                     const currentHardcode = mapping?.hardcodeValue || '';
                                     const currentValueType = mapping?.valueType || 'text';
                                     const isLookup = currentTarget === 'lookup';
-                                    const lookupFixedValue = isLookup && mapping?.fixedValueId
-                                      ? fixedValues.find(fv => fv.id === mapping.fixedValueId)
+                                    const lookupQuery = isLookup && mapping?.lookupQueryId
+                                      ? queries.find(q => q.id === mapping.lookupQueryId)
                                       : null;
 
                                     return (
@@ -675,28 +768,36 @@ export default function ActionsConfigModal({
                                             {param.name}
                                           </span>
                                           <span className="text-xs text-gray-400 shrink-0">&rarr;</span>
+                                          <div className="w-32 shrink-0">
+                                            <CustomDropdown
+                                              value={currentTarget}
+                                              onChange={(val) => handleMappingTargetChange(index, param.name, val as 'column' | 'hardcode' | 'prompt' | 'lookup')}
+                                              options={[
+                                                { value: 'column', label: 'Column' },
+                                                { value: 'hardcode', label: 'Hardcode' },
+                                                { value: 'prompt', label: 'Prompt' },
+                                                { value: 'lookup', label: 'Lookup' },
+                                              ]}
+                                              size="sm"
+                                            />
+                                          </div>
                                           {isLookup ? (
                                             <div className="flex-1 flex items-center gap-2">
-                                              <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded">
-                                                <Search className="w-3 h-3" />
-                                                Lookup: {lookupFixedValue?.name || 'Unknown'}
-                                              </span>
-                                              <span className="text-xs text-gray-400 italic">User selects from dropdown at runtime</span>
-                                            </div>
-                                          ) : (
-                                            <>
-                                              <div className="w-32 shrink-0">
+                                              <div className="flex-1">
                                                 <CustomDropdown
-                                                  value={currentTarget}
-                                                  onChange={(val) => handleMappingTargetChange(index, param.name, val as 'column' | 'hardcode' | 'prompt')}
-                                                  options={[
-                                                    { value: 'column', label: 'Column' },
-                                                    { value: 'hardcode', label: 'Hardcode' },
-                                                    { value: 'prompt', label: 'Prompt' },
-                                                  ]}
+                                                  value={mapping?.lookupQueryId || ''}
+                                                  onChange={(val) => handleMappingLookupQueryChange(index, param.name, val)}
+                                                  options={lookupQueries.map(q => ({ value: q.id, label: q.name }))}
+                                                  placeholder="Select lookup query..."
                                                   size="sm"
                                                 />
                                               </div>
+                                              {lookupQuery && (
+                                                <span className="text-xs text-purple-600 dark:text-purple-400 italic shrink-0">Dropdown at runtime</span>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <>
                                               {currentTarget === 'column' && (
                                                 <>
                                                   <div className="flex-1">
@@ -776,6 +877,17 @@ export default function ActionsConfigModal({
                                             </>
                                           )}
                                         </div>
+                                        {isLookup && (
+                                          <div className="ml-[calc(7rem+2.5rem)] mt-1">
+                                            <input
+                                              type="text"
+                                              value={mapping?.promptText || ''}
+                                              onChange={(e) => handleMappingPromptTextChange(index, param.name, e.target.value)}
+                                              className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                              placeholder="Display label (e.g. ISO Number)"
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -810,15 +922,27 @@ export default function ActionsConfigModal({
                                           <div className="w-32 shrink-0">
                                             <CustomDropdown
                                               value={currentTarget}
-                                              onChange={(val) => handleMappingTargetChange(index, mapping.parameterName, val as 'column' | 'hardcode' | 'prompt')}
+                                              onChange={(val) => handleMappingTargetChange(index, mapping.parameterName, val as 'column' | 'hardcode' | 'prompt' | 'lookup')}
                                               options={[
                                                 { value: 'column', label: 'Column' },
                                                 { value: 'hardcode', label: 'Hardcode' },
                                                 { value: 'prompt', label: 'Prompt' },
+                                                { value: 'lookup', label: 'Lookup' },
                                               ]}
                                               size="sm"
                                             />
                                           </div>
+                                          {currentTarget === 'lookup' && (
+                                            <div className="flex-1">
+                                              <CustomDropdown
+                                                value={mapping.lookupQueryId || ''}
+                                                onChange={(val) => handleMappingLookupQueryChange(index, mapping.parameterName, val)}
+                                                options={lookupQueries.map(q => ({ value: q.id, label: q.name }))}
+                                                placeholder="Select lookup query..."
+                                                size="sm"
+                                              />
+                                            </div>
+                                          )}
                                           {currentTarget === 'column' && (
                                             <>
                                               <div className="flex-1">
@@ -864,6 +988,17 @@ export default function ActionsConfigModal({
                                             </div>
                                           )}
                                         </div>
+                                        {currentTarget === 'lookup' && (
+                                          <div className="ml-[calc(7rem+2.5rem)] mt-1">
+                                            <input
+                                              type="text"
+                                              value={mapping.promptText || ''}
+                                              onChange={(e) => handleMappingPromptTextChange(index, mapping.parameterName, e.target.value)}
+                                              className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                              placeholder="Display label (e.g. ISO Number)"
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -955,15 +1090,27 @@ export default function ActionsConfigModal({
                                           <div className="w-32 shrink-0">
                                             <CustomDropdown
                                               value={currentTarget}
-                                              onChange={(val) => handleMappingTargetChange(index, paramName, val as 'column' | 'hardcode' | 'prompt')}
+                                              onChange={(val) => handleMappingTargetChange(index, paramName, val as 'column' | 'hardcode' | 'prompt' | 'lookup')}
                                               options={[
                                                 { value: 'column', label: 'Cell from Grid' },
                                                 { value: 'hardcode', label: 'Hardcode' },
                                                 { value: 'prompt', label: 'User Entry' },
+                                                { value: 'lookup', label: 'Lookup' },
                                               ]}
                                               size="sm"
                                             />
                                           </div>
+                                          {currentTarget === 'lookup' && (
+                                            <div className="flex-1">
+                                              <CustomDropdown
+                                                value={mapping?.lookupQueryId || ''}
+                                                onChange={(val) => handleMappingLookupQueryChange(index, paramName, val)}
+                                                options={lookupQueries.map(q => ({ value: q.id, label: q.name }))}
+                                                placeholder="Select lookup query..."
+                                                size="sm"
+                                              />
+                                            </div>
+                                          )}
                                           {currentTarget === 'column' && (
                                             <>
                                               <div className="flex-1">
@@ -1009,6 +1156,17 @@ export default function ActionsConfigModal({
                                             </div>
                                           )}
                                         </div>
+                                        {currentTarget === 'lookup' && (
+                                          <div className="ml-[calc(7rem+2.5rem)] mt-1">
+                                            <input
+                                              type="text"
+                                              value={mapping?.promptText || ''}
+                                              onChange={(e) => handleMappingPromptTextChange(index, paramName, e.target.value)}
+                                              className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                              placeholder="Display label (e.g. ISO Number)"
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -1085,15 +1243,28 @@ export default function ActionsConfigModal({
             )}
 
             <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={handleAddAction}
-                disabled={!cellId}
-              >
-                <Plus className="w-4 h-4" />
-                Add Action
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleAddAction}
+                  disabled={!cellId || reorderMode}
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Action
+                </Button>
+                {actions.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant={reorderMode ? 'primary' : 'secondary'}
+                    onClick={() => setReorderMode(!reorderMode)}
+                    disabled={!cellId}
+                  >
+                    <ArrowUpDown className="w-4 h-4" />
+                    {reorderMode ? 'Done Ordering' : 'Order'}
+                  </Button>
+                )}
+              </div>
               <Button
                 onClick={handleSave}
                 loading={saving}
