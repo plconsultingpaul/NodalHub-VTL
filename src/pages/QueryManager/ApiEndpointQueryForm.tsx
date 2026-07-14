@@ -138,6 +138,8 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
 
   const [name, setName] = useState(query?.name || '');
   const [purposeType, setPurposeType] = useState<QueryPurposeType>(query?.purpose_type || 'query');
+  const [lookupValueField, setLookupValueField] = useState(query?.lookup_value_field || '');
+  const [lookupLabelField, setLookupLabelField] = useState(query?.lookup_label_field || '');
   const [selectedEndpointId, setSelectedEndpointId] = useState(query?.api_endpoint_id || '');
   const [httpMethod, setHttpMethod] = useState(query?.http_method || 'GET');
   const [apiSubPath, setApiSubPath] = useState(query?.api_sub_path || '');
@@ -719,7 +721,9 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
       user_parameters: userParameters.filter(p => p.name.length > 1 && p.prompt.trim()),
       request_body_template: requestBodyTemplate || null,
       request_body_field_mappings: requestBodyFieldMappings.length > 0 ? requestBodyFieldMappings : [],
-      path_variable_config: Object.keys(pathVariableConfig).length > 0 ? pathVariableConfig : {}
+      path_variable_config: Object.keys(pathVariableConfig).length > 0 ? pathVariableConfig : {},
+      lookup_value_field: purposeType === 'lookup' ? (lookupValueField.trim() || null) : null,
+      lookup_label_field: purposeType === 'lookup' ? (lookupLabelField.trim() || null) : null,
     };
 
     console.log('[ApiEndpointQueryForm] Save data:', saveData);
@@ -765,6 +769,37 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
           className="w-48"
         />
       </div>
+
+      {purposeType === 'lookup' && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Value Field
+            </label>
+            <input
+              type="text"
+              value={lookupValueField}
+              onChange={(e) => setLookupValueField(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              placeholder="e.g. id"
+            />
+            <p className="text-xs text-gray-500 mt-1">Column used as the selected value</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Label Field
+            </label>
+            <input
+              type="text"
+              value={lookupLabelField}
+              onChange={(e) => setLookupLabelField(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              placeholder="e.g. name"
+            />
+            <p className="text-xs text-gray-500 mt-1">Column shown to the user</p>
+          </div>
+        </div>
+      )}
 
       <div className="border-t pt-4">
         <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Step Configuration</h4>
