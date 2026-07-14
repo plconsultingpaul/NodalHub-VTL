@@ -39,6 +39,10 @@ export default function DashboardViewer() {
   const { fixedValues } = useFixedValues();
   const { resolveLookup, getLookupState } = useLookupResolver();
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefreshMinutes, setAutoRefreshMinutes] = useState<number>(
+    activeDashboard?.dashboard.auto_refresh_minutes || 0
+  );
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const [cellRecordCounts, setCellRecordCounts] = useState<Record<string, number>>({});
   const [fullscreenCellId, setFullscreenCellId] = useState<string | null>(null);
   const [showParamModal, setShowParamModal] = useState(false);
@@ -67,6 +71,7 @@ export default function DashboardViewer() {
   const [drilldownColumns, setDrilldownColumns] = useState<Record<string, Record<string, string[]>>>({});
   const [buttonActions, setButtonActions] = useState<Record<string, DashboardCellActionWithQuery[]>>({});
   const [executingAction, setExecutingAction] = useState<string | null>(null);
+  const [actionProgress, setActionProgress] = useState<{ name: string; current: number; total: number } | null>(null);
   const [actionToasts, setActionToasts] = useState<ActionToastData[]>([]);
   const [exportDropdownCellId, setExportDropdownCellId] = useState<string | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -327,6 +332,7 @@ export default function DashboardViewer() {
     }
 
     setExecutingAction(action.id);
+    setActionProgress({ name: action.display_name, current: 0, total: 1 });
     const toastId = addToast({
       type: 'progress',
       message: `Running "${action.display_name}"...`,
@@ -335,6 +341,7 @@ export default function DashboardViewer() {
 
     try {
       const result = await cellRef.executeActionOnSelectedRows(action, (current, total) => {
+        setActionProgress({ name: action.display_name, current, total });
         updateToast(toastId, {
           progress: { current, total },
           message: `Running "${action.display_name}"...`,
@@ -395,6 +402,7 @@ export default function DashboardViewer() {
       }
     } finally {
       setExecutingAction(null);
+      setActionProgress(null);
     }
   }, [addToast, updateToast, activeCompany, activeDashboardId]);
 
@@ -749,7 +757,37 @@ export default function DashboardViewer() {
       return Promise.resolve();
     });
     await Promise.all(refreshPromises);
+    setLastRefreshTime(new Date());
     setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (autoRefreshMinutes <= 0) return;
+    const intervalMs = autoRefreshMinutes * 60 * 1000;
+    const id = setInterval(() => {
+      const refreshPromises = cells.map(cell => {
+        const ref = cellRefs.current[cell.id];
+        if (ref?.refreshData) return ref.refreshData();
+        return Promise.resolve();
+      });
+      Promise.all(refreshPromises).then(() => setLastRefreshTime(new Date()));
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [autoRefreshMinutes, cells]);
+
+  useEffect(() => {
+    setAutoRefreshMinutes(activeDashboard?.dashboard.auto_refresh_minutes || 0);
+  }, [activeDashboardId]);
+
+  const handleAutoRefreshChange = async (val: string) => {
+    const minutes = Number(val);
+    setAutoRefreshMinutes(minutes);
+    if (activeDashboardId) {
+      await supabase
+        .from('dashboards')
+        .update({ auto_refresh_minutes: minutes || null })
+        .eq('id', activeDashboardId);
+    }
   };
 
   const handleEditAllParameters = () => {
@@ -1351,6 +1389,27 @@ export default function DashboardViewer() {
                 <Shield className="w-4 h-4" />
               </Button>
             )}
+            <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap px-1">
+              {lastRefreshTime
+                ? `Last: ${lastRefreshTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                : 'Last: --:--'}
+            </span>
+            <CustomDropdown
+              value={String(autoRefreshMinutes)}
+              onChange={handleAutoRefreshChange}
+              options={[
+                { value: '0', label: 'Auto: Off' },
+                { value: '1', label: 'Auto: 1 min' },
+                { value: '2', label: 'Auto: 2 min' },
+                { value: '5', label: 'Auto: 5 min' },
+                { value: '10', label: 'Auto: 10 min' },
+                { value: '15', label: 'Auto: 15 min' },
+                { value: '30', label: 'Auto: 30 min' },
+              ]}
+              size="sm"
+              autoWidth
+              dropdownMinWidth={130}
+            />
             <Button
               variant="secondary"
               size="sm"
@@ -1730,6 +1789,35 @@ export default function DashboardViewer() {
         onSave={handleSaveAs}
         existingNames={templates.map(t => t.name)}
       />
+
+      {actionProgress && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl px-8 py-6 w-80 flex flex-col items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+              <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Processing Action
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {actionProgress.name}
+              </p>
+            </div>
+            <div className="w-full">
+              <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${actionProgress.total > 0 ? (actionProgress.current / actionProgress.total) * 100 : 0}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
+                {actionProgress.current} of {actionProgress.total} row{actionProgress.total !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ActionToast toasts={actionToasts} onDismiss={dismissToast} />
 
