@@ -202,6 +202,111 @@ export function useLookupResolver() {
     }
   }, []);
 
+  const resolveLookupByQueryId = useCallback(async (queryId: string) => {
+    console.log('[LookupResolver] resolveLookupByQueryId called for queryId:', queryId);
+
+    if (!queryId) return;
+
+    const key = `query_${queryId}`;
+    if (fetchedRef.current.has(key)) {
+      console.log('[LookupResolver] Already fetched, skipping:', key);
+      return;
+    }
+    fetchedRef.current.add(key);
+
+    setLookupData(prev => ({
+      ...prev,
+      [key]: { options: [], loading: true, error: null }
+    }));
+
+    try {
+      const { data: query, error: queryError } = await supabase
+        .from('queries')
+        .select(`*, api_endpoints (id, name, url, auth_type, auth_config, headers)`)
+        .eq('id', queryId)
+        .maybeSingle();
+
+      if (queryError || !query) {
+        const errMsg = queryError?.message || 'Lookup query not found';
+        console.error('[LookupResolver] Query fetch failed:', errMsg);
+        setLookupData(prev => ({
+          ...prev,
+          [key]: { options: [], loading: false, error: errMsg }
+        }));
+        return;
+      }
+
+      console.log('[LookupResolver] Query loaded:', query.name, 'type:', query.query_type);
+
+      const endpoint = query.api_endpoints as ApiEndpoint | null;
+      if (!endpoint) {
+        setLookupData(prev => ({
+          ...prev,
+          [key]: { options: [], loading: false, error: 'No endpoint configured on lookup query' }
+        }));
+        return;
+      }
+
+      const headers = buildEndpointHeaders(endpoint);
+      const isNodalConnect = query.query_type === 'sql' || query.query_type === 'stored_procedure';
+
+      let url: string;
+      let fetchOptions: RequestInit;
+
+      if (isNodalConnect) {
+        url = `${endpoint.url.replace(/\/$/, '')}/executables/run`;
+        const requestBody = { name: query.name, inputs: {} };
+        fetchOptions = { method: 'POST', headers, body: JSON.stringify(requestBody) };
+      } else {
+        url = endpoint.url.replace(/\/$/, '');
+        const subPath = (query.api_sub_path || '').replace(/^\//, '').replace(/\/$/, '');
+        if (subPath) url = `${url}/${subPath}`;
+
+        const queryParams = query.query_parameters as Array<{ key: string; value: string; enabled: boolean }> | null;
+        const enabledParams = queryParams?.filter(p => p.enabled && p.value);
+        if (query.url_query_string) {
+          url += `?${query.url_query_string}`;
+        } else if (enabledParams && enabledParams.length > 0) {
+          const paramString = enabledParams
+            .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`)
+            .join('&');
+          url += `?${paramString}`;
+        }
+
+        fetchOptions = { method: query.http_method || 'GET', headers };
+      }
+
+      const response = await proxyFetch(url, fetchOptions);
+      const responseData = await response.json();
+
+      const items = extractRows(responseData);
+
+      const valueField = query.lookup_value_field || 'id';
+      const labelField = query.lookup_label_field || 'name';
+
+      const options: LookupOption[] = items.map((item: unknown) => {
+        const record = item as Record<string, unknown>;
+        const val = String(record[valueField] ?? '');
+        const lbl = String(record[labelField] ?? val);
+        return { value: val, label: lbl };
+      });
+
+      console.log('[LookupResolver] resolveLookupByQueryId resolved', options.length, 'options');
+
+      setLookupData(prev => ({
+        ...prev,
+        [key]: { options, loading: false, error: null }
+      }));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Lookup failed';
+      console.error('[LookupResolver] Error:', errMsg, err);
+      setLookupData(prev => ({
+        ...prev,
+        [key]: { options: [], loading: false, error: errMsg }
+      }));
+    }
+  }, []);
+
   const resetLookups = useCallback(() => {
     setLookupData({});
     fetchedRef.current.clear();
@@ -211,9 +316,15 @@ export function useLookupResolver() {
     return lookupData[fixedValueId] || { options: [], loading: false, error: null };
   }, [lookupData]);
 
+  const getLookupStateByQueryId = useCallback((queryId: string): LookupState => {
+    return lookupData[`query_${queryId}`] || { options: [], loading: false, error: null };
+  }, [lookupData]);
+
   return {
     resolveLookup,
+    resolveLookupByQueryId,
     getLookupState,
+    getLookupStateByQueryId,
     lookupData,
     resetLookups
   };
