@@ -251,14 +251,6 @@ export async function executeActionForRow(
       }
     }
 
-    console.log('[actionExecutor] Executing:', {
-      url,
-      method: query.http_method,
-      hasBody: !!body,
-      bodyPreview: body ? body.slice(0, 500) : null,
-      paramValues,
-    });
-
     const response = await proxyFetch(url, {
       method: query.http_method,
       headers,
@@ -267,7 +259,6 @@ export async function executeActionForRow(
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      console.error('[actionExecutor] Action failed:', { status: response.status, response: text.slice(0, 500), url });
       return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
     }
     console.log('[actionExecutor] Action succeeded:', { status: response.status, url });
