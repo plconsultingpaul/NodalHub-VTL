@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, Search } from 'lucide-react';
 
 export interface DropdownOption {
   value: string;
@@ -20,6 +20,7 @@ interface CustomDropdownProps {
   dropdownMinWidth?: number;
   autoWidth?: boolean;
   dropdownMaxWidth?: number;
+  searchable?: boolean;
 }
 
 export default function CustomDropdown({
@@ -35,8 +36,11 @@ export default function CustomDropdown({
   dropdownMinWidth,
   autoWidth = false,
   dropdownMaxWidth,
+  searchable = false,
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number; width: number; maxHeight?: number }>({
     top: 0,
     left: 0,
@@ -94,7 +98,10 @@ export default function CustomDropdown({
   };
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setSearchTerm('');
+      return;
+    }
     updatePosition();
 
     const handleClickOutside = (event: MouseEvent) => {
@@ -121,6 +128,16 @@ export default function CustomDropdown({
       window.removeEventListener('resize', handleReposition);
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && searchable && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isOpen, searchable]);
+
+  const filteredOptions = searchable && searchTerm
+    ? options.filter(o => o.label.toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
 
   const triggerColors = dark ? triggerDark : triggerLight;
   const placeholderColor = dark ? 'text-slate-500' : 'text-slate-400';
@@ -170,12 +187,28 @@ export default function CustomDropdown({
             style={listStyle}
             className={`rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] py-1 origin-top overflow-y-auto overflow-x-auto ${dark ? listDark : listLight} ${dark ? scrollbarDark : scrollbarLight}`}
           >
-            {options.length === 0 ? (
+            {searchable && (
+              <div className={`sticky top-0 p-1.5 ${dark ? 'bg-slate-800 border-b border-slate-700' : 'bg-white border-b border-slate-100'}`}>
+                <div className="relative">
+                  <Search className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${dark ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search..."
+                    className={`w-full pl-7 pr-2 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 focus:ring-blue-500 ${dark ? 'bg-slate-900 border-slate-600 text-slate-200 placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400'}`}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              </div>
+            )}
+            {filteredOptions.length === 0 ? (
               <div className={`${sizeClasses[size]} ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
-                No options
+                {searchable && searchTerm ? 'No matches' : 'No options'}
               </div>
             ) : (
-              options.map((option) => {
+              filteredOptions.map((option) => {
                 const isSelected = option.value === value;
                 const baseItem = `relative flex items-center w-full ${sizeClasses[size]} cursor-pointer select-none transition-colors`;
                 const stateClasses = isSelected
