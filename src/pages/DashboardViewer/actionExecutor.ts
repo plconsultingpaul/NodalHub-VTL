@@ -1,5 +1,6 @@
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
+import { computeDateFunction } from '../../lib/dateFunctions';
 import type {
   ApiEndpoint,
   UserParameter,
@@ -7,6 +8,10 @@ import type {
   DashboardCellActionWithQuery,
   ActionParameterMapping,
   PulseVariableMapping,
+  FixedValue,
+  FixedValueDateConfig,
+  FixedValueListItem,
+  DateFunctionBaseDate,
 } from '../../types/database';
 
 const MULTI_ROW_DELAY_MS = 100;
@@ -115,10 +120,32 @@ async function fetchEndpoint(endpointId: string): Promise<ApiEndpoint | null> {
   return data as ApiEndpoint | null;
 }
 
+function resolveFixedValue(fv: FixedValue): string {
+  if (fv.value_type === 'date' || fv.value_type === 'datetime') {
+    const config = fv.config as FixedValueDateConfig;
+    if (config && config.base_date && config.string_format) {
+      return computeDateFunction(
+        config.base_date as DateFunctionBaseDate,
+        config.string_format,
+        config.adjust_years || 0,
+        config.adjust_months || 0,
+        config.adjust_days || 0
+      );
+    }
+  }
+  if (fv.is_list) {
+    const listItems = (fv.list_values as FixedValueListItem[]) || [];
+    if (fv.default_value) return fv.default_value;
+    return listItems[0]?.value || '';
+  }
+  return fv.single_value || '';
+}
+
 function buildParamValues(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
-  promptValues?: Record<string, string>
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[]
 ): Record<string, string> {
   const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
   const paramValues: Record<string, string> = {};
@@ -128,6 +155,13 @@ function buildParamValues(
     } else if (m.target === 'prompt' || m.target === 'lookup') {
       if (promptValues && promptValues[m.parameterName] !== undefined) {
         paramValues[m.parameterName] = promptValues[m.parameterName];
+      }
+    } else if (m.target === 'fixed_value') {
+      if (m.fixedValueId && fixedValues) {
+        const fv = fixedValues.find(f => f.id === m.fixedValueId);
+        if (fv) {
+          paramValues[m.parameterName] = resolveFixedValue(fv);
+        }
       }
     } else {
       if (m.columnName && rowData[m.columnName] !== undefined) {
@@ -161,12 +195,13 @@ function buildHeaders(ep: ApiEndpoint): Record<string, string> {
 export async function executeActionForRow(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
-  promptValues?: Record<string, string>
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[]
 ): Promise<{ ok: boolean; error?: string }> {
   const query = action.queries;
   if (!query || !query.api_endpoint_id) return { ok: false, error: 'No query or endpoint configured' };
 
-  const paramValues = buildParamValues(action, rowData, promptValues);
+  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues);
 
   try {
     const ep = await fetchEndpoint(query.api_endpoint_id);
@@ -190,6 +225,11 @@ export async function executeActionForRow(
           value = m.hardcodeValue || '';
         } else if (m.target === 'prompt' || m.target === 'lookup') {
           value = promptValues?.[m.parameterName] || '';
+        } else if (m.target === 'fixed_value') {
+          if (m.fixedValueId && fixedValues) {
+            const fv = fixedValues.find(f => f.id === m.fixedValueId);
+            if (fv) value = resolveFixedValue(fv);
+          }
         }
         if (value) {
           const regex = new RegExp(`\\{${varName}\\}`, 'gi');
@@ -366,7 +406,8 @@ export async function executeActionForRows(
   action: DashboardCellActionWithQuery,
   rows: Record<string, unknown>[],
   onProgress?: ActionProgressCallback,
-  promptValues?: Record<string, string>
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[]
 ): Promise<ActionExecutionResult> {
   if (rows.length === 0) {
     return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
@@ -379,7 +420,7 @@ export async function executeActionForRows(
 
   for (let i = 0; i < rows.length; i++) {
     onProgress?.(i + 1, rows.length);
-    const result = await executeActionForRow(action, rows[i], promptValues);
+    const result = await executeActionForRow(action, rows[i], promptValues, fixedValues);
     if (result.ok) {
       success++;
       if (action.post_action_pulse_id) {
@@ -413,12 +454,13 @@ export function getPromptMappings(action: DashboardCellActionWithQuery): ActionP
 export function executeLinkAction(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
-  promptValues?: Record<string, string>
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[]
 ): void {
   const urlTemplate = action.link_url_template || '';
   if (!urlTemplate) return;
 
-  const paramValues = buildParamValues(action, rowData, promptValues);
+  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues);
 
   let url = urlTemplate;
   Object.entries(paramValues).forEach(([name, value]) => {
