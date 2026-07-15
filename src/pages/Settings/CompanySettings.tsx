@@ -3,11 +3,28 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
+import CustomDropdown from '../../components/ui/CustomDropdown';
 import { Building2, Save, Plus, Check, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+
+const TIMEZONE_OPTIONS = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern (US)' },
+  { value: 'America/Chicago', label: 'Central (US)' },
+  { value: 'America/Denver', label: 'Mountain (US)' },
+  { value: 'America/Los_Angeles', label: 'Pacific (US)' },
+  { value: 'Europe/London', label: 'London (UK)' },
+  { value: 'Europe/Paris', label: 'Paris (EU)' },
+  { value: 'Europe/Berlin', label: 'Berlin (EU)' },
+  { value: 'Asia/Tokyo', label: 'Tokyo (JP)' },
+  { value: 'Asia/Shanghai', label: 'Shanghai (CN)' },
+  { value: 'Australia/Sydney', label: 'Sydney (AU)' },
+  { value: 'Pacific/Auckland', label: 'Auckland (NZ)' },
+];
 
 export default function CompanySettings() {
   const { user, activeCompany, companies, setActiveCompany, refreshCompanies } = useAuth();
   const [name, setName] = useState(activeCompany?.name || '');
+  const [defaultTimezone, setDefaultTimezone] = useState(activeCompany?.default_timezone || 'UTC');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -29,6 +46,7 @@ export default function CompanySettings() {
 
   useEffect(() => {
     setName(activeCompany?.name || '');
+    setDefaultTimezone(activeCompany?.default_timezone || 'UTC');
   }, [activeCompany]);
 
   const handleSave = async () => {
@@ -39,7 +57,7 @@ export default function CompanySettings() {
 
     const { error } = await supabase
       .from('companies')
-      .update({ name, updated_at: new Date().toISOString() })
+      .update({ name, default_timezone: defaultTimezone, updated_at: new Date().toISOString() })
       .eq('id', activeCompany.id);
 
     setSaving(false);
@@ -194,6 +212,23 @@ export default function CompanySettings() {
                     Only administrators can edit company settings
                   </p>
                 )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Default Timezone
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Used as the default timezone when creating new schedule rules and other date/time settings.
+              </p>
+              <div className="max-w-md">
+                <CustomDropdown
+                  value={defaultTimezone}
+                  onChange={(val) => setDefaultTimezone(val)}
+                  options={TIMEZONE_OPTIONS}
+                  disabled={!isAdmin}
+                />
               </div>
             </div>
 
