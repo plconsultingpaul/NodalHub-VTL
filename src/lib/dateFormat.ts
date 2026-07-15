@@ -7,20 +7,55 @@ function pad(n: number, len = 2): string {
   return String(n).padStart(len, '0');
 }
 
+function parseRawDate(str: string): { y: number; m: number; d: number; h24: number; min: number; sec: number } | null {
+  // ISO 8601: 2024-01-15T09:30:00Z or 2024-01-15T09:30:00+05:00 or 2024-01-15T09:30:00
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (iso) {
+    return { y: +iso[1], m: +iso[2] - 1, d: +iso[3], h24: +iso[4], min: +iso[5], sec: +(iso[6] || 0) };
+  }
+  // Date only: 2024-01-15
+  const dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return { y: +dateOnly[1], m: +dateOnly[2] - 1, d: +dateOnly[3], h24: 0, min: 0, sec: 0 };
+  }
+  // DD/MM/YYYY or MM/DD/YYYY with optional time - parse as raw positional
+  const slashed = str.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (slashed) {
+    const p1 = +slashed[1], p2 = +slashed[2];
+    let yr = +slashed[3];
+    if (yr < 100) yr += 2000;
+    // If first part > 12, it must be day (DD/MM/YYYY)
+    const day = p1 > 12 ? p1 : p2 > 12 ? p2 : p1;
+    const mon = p1 > 12 ? p2 : p2 > 12 ? p1 : p2;
+    return { y: yr, m: mon - 1, d: day, h24: +(slashed[4] || 0), min: +(slashed[5] || 0), sec: +(slashed[6] || 0) };
+  }
+  return null;
+}
+
+function dayOfWeek(y: number, m: number, d: number): number {
+  // Zeller-like: m is 0-indexed
+  const t = new Date(y, m, d);
+  return t.getDay();
+}
+
 export function formatDateValue(value: unknown, format: string): string | null {
   if (value === null || value === undefined || value === '') return null;
-  const str = String(value);
-  const date = new Date(str);
-  if (isNaN(date.getTime())) return null;
+  const str = String(value).trim();
 
-  const d = date.getDate();
-  const m = date.getMonth();
-  const y = date.getFullYear();
-  const day = date.getDay();
-  const h24 = date.getHours();
+  const parsed = parseRawDate(str);
+  if (!parsed) {
+    // Fallback: use Date but with UTC accessors to avoid local timezone shift
+    const date = new Date(str);
+    if (isNaN(date.getTime())) return null;
+    return formatParts(format, date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
+  }
+
+  return formatParts(format, parsed.y, parsed.m, parsed.d, parsed.h24, parsed.min, parsed.sec);
+}
+
+function formatParts(format: string, y: number, m: number, d: number, h24: number, min: number, sec: number): string {
+  const day = dayOfWeek(y, m, d);
   const h12 = h24 % 12 || 12;
-  const min = date.getMinutes();
-  const sec = date.getSeconds();
   const ampm = h24 >= 12 ? 'pm' : 'am';
   const yy = String(y).slice(-2);
 
