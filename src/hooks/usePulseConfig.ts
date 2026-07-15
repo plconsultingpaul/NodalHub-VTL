@@ -10,7 +10,7 @@ import type {
 } from '../types/database';
 
 export function usePulseConfig(pulseId: string | null) {
-  const [schedule, setSchedule] = useState<PulseSchedule | null>(null);
+  const [schedules, setSchedules] = useState<PulseSchedule[]>([]);
   const [exportConfig, setExportConfig] = useState<PulseExport | null>(null);
   const [email, setEmail] = useState<PulseEmail | null>(null);
   const [postRunSteps, setPostRunSteps] = useState<PulsePostRunStep[]>([]);
@@ -20,7 +20,7 @@ export function usePulseConfig(pulseId: string | null) {
 
   const fetchConfig = useCallback(async () => {
     if (!pulseId) {
-      setSchedule(null);
+      setSchedules([]);
       setExportConfig(null);
       setEmail(null);
       setPostRunSteps([]);
@@ -34,7 +34,7 @@ export function usePulseConfig(pulseId: string | null) {
 
     try {
       const [scheduleRes, exportRes, emailRes, stepsRes, executionsRes] = await Promise.all([
-        supabase.from('pulse_schedules').select('*').eq('pulse_id', pulseId).maybeSingle(),
+        supabase.from('pulse_schedules').select('*').eq('pulse_id', pulseId).order('updated_at', { ascending: true }),
         supabase.from('pulse_exports').select('*').eq('pulse_id', pulseId).maybeSingle(),
         supabase.from('pulse_emails').select('*').eq('pulse_id', pulseId).maybeSingle(),
         supabase
@@ -56,7 +56,7 @@ export function usePulseConfig(pulseId: string | null) {
       if (stepsRes.error) throw stepsRes.error;
       if (executionsRes.error) throw executionsRes.error;
 
-      setSchedule(scheduleRes.data);
+      setSchedules(scheduleRes.data || []);
       setExportConfig(exportRes.data);
       setEmail(emailRes.data);
       setPostRunSteps(stepsRes.data || []);
@@ -72,27 +72,42 @@ export function usePulseConfig(pulseId: string | null) {
     fetchConfig();
   }, [fetchConfig]);
 
-  const upsertSchedule = async (updates: Partial<PulseSchedule>) => {
-    if (!pulseId) return { error: 'No pulse selected' };
-
+  const saveSchedule = async (schedule: Partial<PulseSchedule> & { pulse_id: string }) => {
     const payload: Record<string, unknown> = {
-      pulse_id: pulseId,
-      ...updates,
+      ...schedule,
       updated_at: new Date().toISOString(),
     };
 
-    if (updates.enabled === false) {
+    if (schedule.enabled === false) {
       payload.next_run_at = null;
-    } else if (updates.cron_expression) {
-      const tz = (updates.timezone as string) || (schedule?.timezone as string) || 'UTC';
-      payload.next_run_at = computeNextCronRun(updates.cron_expression, tz);
+    } else if (schedule.cron_expression) {
+      const tz = (schedule.timezone as string) || 'UTC';
+      payload.next_run_at = computeNextCronRun(schedule.cron_expression, tz);
     }
 
-    const { error: upsertError } = await supabase
-      .from('pulse_schedules')
-      .upsert(payload, { onConflict: 'pulse_id' });
+    if (schedule.id) {
+      const { error: updateError } = await supabase
+        .from('pulse_schedules')
+        .update(payload)
+        .eq('id', schedule.id);
+      if (updateError) return { error: updateError.message };
+    } else {
+      const { error: insertError } = await supabase
+        .from('pulse_schedules')
+        .insert(payload);
+      if (insertError) return { error: insertError.message };
+    }
 
-    if (upsertError) return { error: upsertError.message };
+    await fetchConfig();
+    return { error: null };
+  };
+
+  const deleteSchedule = async (scheduleId: string) => {
+    const { error: deleteError } = await supabase
+      .from('pulse_schedules')
+      .delete()
+      .eq('id', scheduleId);
+    if (deleteError) return { error: deleteError.message };
     await fetchConfig();
     return { error: null };
   };
@@ -165,7 +180,7 @@ export function usePulseConfig(pulseId: string | null) {
   };
 
   return {
-    schedule,
+    schedules,
     exportConfig,
     email,
     postRunSteps,
@@ -173,7 +188,8 @@ export function usePulseConfig(pulseId: string | null) {
     loading,
     error,
     refetch: fetchConfig,
-    upsertSchedule,
+    saveSchedule,
+    deleteSchedule,
     upsertExport,
     upsertEmail,
     addPostRunStep,
