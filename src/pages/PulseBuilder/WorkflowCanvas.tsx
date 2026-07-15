@@ -24,7 +24,7 @@ import TriggerConfigPanel from './panels/TriggerConfigPanel';
 import ApiEndpointConfigPanel from './panels/ApiEndpointConfigPanel';
 import EmailConfigPanel from './panels/EmailConfigPanel';
 import ConditionConfigPanel from './panels/ConditionConfigPanel';
-import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseInputVariable } from '../../types/database';
+import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseInputVariable, PulseSchedule } from '../../types/database';
 
 const nodeTypes = {
   trigger: TriggerNode,
@@ -84,10 +84,20 @@ interface WorkflowCanvasProps {
   isNew?: boolean;
   triggerType?: 'scheduled' | 'action';
   inputVariables?: PulseInputVariable[];
+  schedules?: PulseSchedule[];
 }
 
 let nodeId = 0;
-const getNodeId = () => `node_${++nodeId}`;
+const getNodeId = (existingNodes?: Node[]) => {
+  if (existingNodes) {
+    const maxExisting = existingNodes.reduce((max, n) => {
+      const match = n.id.match(/^node_(\d+)$/);
+      return match ? Math.max(max, parseInt(match[1])) : max;
+    }, 0);
+    if (maxExisting >= nodeId) nodeId = maxExisting;
+  }
+  return `node_${++nodeId}`;
+};
 
 export default function WorkflowCanvas({
   pulseName,
@@ -102,6 +112,7 @@ export default function WorkflowCanvas({
   isNew,
   triggerType,
   inputVariables,
+  schedules,
 }: WorkflowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -268,7 +279,7 @@ export default function WorkflowCanvas({
     const sourceNode = nodes.find((n) => n.id === nodeId);
     if (!sourceNode) return;
 
-    const newId = getNodeId();
+    const newId = getNodeId(nodes);
     const newNode: Node = {
       id: newId,
       type: sourceNode.type,
@@ -301,7 +312,7 @@ export default function WorkflowCanvas({
       };
 
       const newNode: Node = {
-        id: getNodeId(),
+        id: getNodeId(nodes),
         type,
         position,
         data: { label: labelMap[type] || type, configured: false },
@@ -456,6 +467,7 @@ export default function WorkflowCanvas({
           onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
           triggerType={triggerType}
           inputVariables={inputVariables}
+          schedules={schedules}
         />
       );
     }
