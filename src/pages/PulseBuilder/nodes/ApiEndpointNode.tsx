@@ -1,6 +1,6 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { Database, Trash2, Copy } from 'lucide-react';
+import { Database, Trash2, Copy, Check, X } from 'lucide-react';
 
 interface ApiEndpointNodeData {
   label: string;
@@ -12,6 +12,8 @@ interface ApiEndpointNodeData {
 }
 
 function ApiEndpointNode({ id, data, selected }: NodeProps<ApiEndpointNodeData>) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   return (
     <div
       className={`group relative px-4 py-3 rounded-lg border-2 shadow-sm min-w-[180px] transition-all ${
@@ -27,21 +29,42 @@ function ApiEndpointNode({ id, data, selected }: NodeProps<ApiEndpointNodeData>)
         position={Position.Top}
         className="!w-3 !h-3 !bg-green-500 !border-2 !border-white dark:!border-gray-800"
       />
-      <div className="absolute -top-2 -right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e) => { e.stopPropagation(); data.onCopy?.(id); }}
-          className="w-5 h-5 rounded bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-          title="Copy node"
-        >
-          <Copy className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); data.onDelete?.(id); }}
-          className="w-5 h-5 rounded bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 flex items-center justify-center shadow-sm hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-          title="Delete node"
-        >
-          <Trash2 className="w-3 h-3 text-red-500" />
-        </button>
+      <div className={`absolute -top-2 -right-2 flex items-center gap-0.5 transition-opacity ${confirmingDelete ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        {confirmingDelete ? (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); data.onDelete?.(id); }}
+              className="w-5 h-5 rounded bg-red-500 border border-red-600 flex items-center justify-center shadow-sm hover:bg-red-600 transition-colors"
+              title="Confirm delete"
+            >
+              <Check className="w-3 h-3 text-white" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmingDelete(false); }}
+              className="w-5 h-5 rounded bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+              title="Cancel"
+            >
+              <X className="w-3 h-3 text-gray-500 dark:text-gray-400" />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); data.onCopy?.(id); }}
+              className="w-5 h-5 rounded bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+              title="Copy node"
+            >
+              <Copy className="w-3 h-3 text-gray-500 dark:text-gray-400" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmingDelete(true); }}
+              className="w-5 h-5 rounded bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 flex items-center justify-center shadow-sm hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+              title="Delete node"
+            >
+              <Trash2 className="w-3 h-3 text-red-500" />
+            </button>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-2.5">
         <div className="w-8 h-8 rounded-md bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
