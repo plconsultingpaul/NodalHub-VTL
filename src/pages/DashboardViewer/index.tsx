@@ -1055,6 +1055,7 @@ export default function DashboardViewer() {
                 onChange={(v) => handleParamChange(param.name, v)}
                 options={lookupState.options}
                 placeholder="Select an option..."
+                searchable
               />
             );
           }
@@ -1448,7 +1449,7 @@ export default function DashboardViewer() {
                 {cell.title && (
                   <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex-shrink-0 flex items-center justify-between">
                     <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2 min-w-0">
-                      <span className="truncate">{cell.title}</span>
+                      <span className="truncate" title={cell.queries?.name || undefined}>{cell.title}</span>
                       {cellRecordCounts[cell.id] !== undefined && (
                         <span className="text-gray-500 dark:text-gray-400 font-normal flex-shrink-0">
                           - {cellRecordCounts[cell.id]} records
@@ -1613,7 +1614,7 @@ export default function DashboardViewer() {
                       {cell.title && (
                         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex-shrink-0 flex items-center justify-between">
                           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2 min-w-0">
-                            <span className="truncate">{cell.title}</span>
+                            <span className="truncate" title={cell.queries?.name || undefined}>{cell.title}</span>
                             {cellRecordCounts[cell.id] !== undefined && (
                               <span className="text-gray-500 dark:text-gray-400 font-normal flex-shrink-0">
                                 - {cellRecordCounts[cell.id]} records
