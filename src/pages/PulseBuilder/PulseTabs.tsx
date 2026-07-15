@@ -1,21 +1,25 @@
-import { Activity } from 'lucide-react';
+import { Activity, Clock } from 'lucide-react';
 
-export type PulseTabKey = 'main';
+export type PulseTabKey = 'main' | 'schedule';
 
 interface PulseTabsProps {
   activeTab: PulseTabKey;
   onChange: (tab: PulseTabKey) => void;
+  showScheduleTab?: boolean;
 }
 
-const TABS: { key: PulseTabKey; label: string; icon: typeof Activity }[] = [
+const TABS: { key: PulseTabKey; label: string; icon: typeof Activity; requireSchedule?: boolean }[] = [
   { key: 'main', label: 'Main', icon: Activity },
+  { key: 'schedule', label: 'Schedule', icon: Clock, requireSchedule: true },
 ];
 
-export default function PulseTabs({ activeTab, onChange }: PulseTabsProps) {
+export default function PulseTabs({ activeTab, onChange, showScheduleTab = true }: PulseTabsProps) {
+  const visibleTabs = TABS.filter(t => !t.requireSchedule || showScheduleTab);
+
   return (
     <div className="px-6 pb-3">
       <div className="bg-slate-100 dark:bg-gray-800 p-1 rounded-lg inline-flex items-center gap-1 overflow-x-auto no-scrollbar">
-        {TABS.map(({ key, label, icon: Icon }) => {
+        {visibleTabs.map(({ key, label, icon: Icon }) => {
           const isActive = activeTab === key;
           return (
             <button
