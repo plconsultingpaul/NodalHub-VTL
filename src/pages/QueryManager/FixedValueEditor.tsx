@@ -38,7 +38,8 @@ const DATETIME_FORMAT_OPTIONS = [
   { value: 'MM/dd/yyyy HH:mm:ss', label: 'MM/dd/yyyy HH:mm:ss' },
   { value: 'dd/MM/yyyy HH:mm', label: 'dd/MM/yyyy HH:mm' },
   { value: 'yyyy-MM-dd HH:mm:ss', label: 'yyyy-MM-dd HH:mm:ss' },
-  { value: 'ISO8601', label: 'ISO 8601' }
+  { value: 'YYYY-MM-DDTHH:mm:ss', label: 'YYYY-MM-DDTHH:mm:ss (ISO DateTime)' },
+  { value: 'ISO8601', label: 'ISO 8601 (UTC)' }
 ];
 
 const getDefaultConfig = (type: FixedValueType): FixedValueDateConfig | FixedValueDateTimeConfig | Record<string, unknown> => {
@@ -72,6 +73,10 @@ const formatDate = (date: Date, format: string): string => {
 
   if (format === 'ISO8601') {
     return date.toISOString();
+  }
+
+  if (format === 'YYYY-MM-DDTHH:mm:ss') {
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
 
   return format
