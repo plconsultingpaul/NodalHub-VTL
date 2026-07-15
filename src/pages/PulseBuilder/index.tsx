@@ -10,6 +10,7 @@ import { useProjects } from '../../hooks/useProjects';
 import Button from '../../components/ui/Button';
 import PulseTabs, { type PulseTabKey } from './PulseTabs';
 import MainTab from './MainTab';
+import ScheduleTab from './ScheduleTab';
 import WorkflowCanvas from './WorkflowCanvas';
 import ExecutionHistory from './ExecutionHistory';
 import LegacyMigration from './LegacyMigration';
@@ -59,11 +60,12 @@ export default function PulseBuilder() {
   const { createPulse, updatePulse } = usePulses();
   const { refetch: refetchProjects } = useProjects();
   const {
-    schedule,
+    schedules,
     exportConfig: existingExport,
     email: existingEmail,
     refetch: refetchPulseConfig,
-    upsertSchedule,
+    saveSchedule,
+    deleteSchedule,
     upsertExport,
     upsertEmail,
   } = usePulseConfig(pulseBuilderPulseId);
@@ -75,7 +77,7 @@ export default function PulseBuilder() {
   const [stepConfigs, setStepConfigs] = useState<Record<string, PulseStepConfig>>({});
   const [pulse, setPulse] = useState<Pulse | null>(null);
   const [pulseDraft, setPulseDraft] = useState<PulseInsert | null>(null);
-  const [scheduleDraft, setScheduleDraft] = useState<Partial<PulseSchedule>>({ enabled: false, cron_expression: '0 8 * * *', timezone: 'UTC' });
+
   const [exportDraft, setExportDraft] = useState<Partial<PulseExport>>(emptyExportDraft());
   const [emailDraft, setEmailDraft] = useState<Partial<PulseEmail>>(emptyEmailDraft());
   const [loading, setLoading] = useState(true);
@@ -96,7 +98,6 @@ export default function PulseBuilder() {
         if (!cancelled) {
           setPulse(null);
           setPulseDraft(emptyPulseDraft(activeCompany.id, pulseBuilderProjectId, user.id));
-          setScheduleDraft({ enabled: false, cron_expression: '0 8 * * *', timezone: 'UTC' });
           setExportDraft(emptyExportDraft());
           setEmailDraft(emptyEmailDraft());
           setCanvasNodes([]);
@@ -165,12 +166,6 @@ export default function PulseBuilder() {
       setEmailDraft(existingEmail);
     }
   }, [existingEmail]);
-
-  useEffect(() => {
-    if (schedule) {
-      setScheduleDraft(schedule);
-    }
-  }, [schedule]);
 
   const fetchLatestExecution = useCallback(async () => {
     if (!pulseBuilderPulseId) {
@@ -299,15 +294,18 @@ export default function PulseBuilder() {
           })
         );
       }
-      if (schedule) {
-        copies.push(
-          supabase.from('pulse_schedules').insert({
-            pulse_id: newPulse.id,
-            enabled: false,
-            cron_expression: schedule.cron_expression,
-            timezone: schedule.timezone,
-          })
-        );
+      if (schedules.length > 0) {
+        for (const sched of schedules) {
+          copies.push(
+            supabase.from('pulse_schedules').insert({
+              pulse_id: newPulse.id,
+              label: sched.label,
+              enabled: false,
+              cron_expression: sched.cron_expression,
+              timezone: sched.timezone,
+            })
+          );
+        }
       }
       await Promise.all(copies);
 
@@ -330,10 +328,6 @@ export default function PulseBuilder() {
 
   const handleEmailChange = useCallback((updates: Partial<PulseEmail>) => {
     setEmailDraft((prev) => ({ ...prev, ...updates }));
-  }, []);
-
-  const handleScheduleChange = useCallback((updates: Partial<PulseSchedule>) => {
-    setScheduleDraft((prev) => ({ ...prev, ...updates }));
   }, []);
 
   const handleSave = async (overrideCanvas?: { nodes: Node[]; edges: Edge[]; configs: Record<string, PulseStepConfig> }) => {
@@ -423,12 +417,6 @@ export default function PulseBuilder() {
           column_formats: (emailDraft as Record<string, unknown>).column_formats ?? {},
           include_header_row: (emailDraft as Record<string, unknown>).include_header_row ?? true,
         }),
-        upsertSchedule({
-          pulse_id: pulseId!,
-          enabled: scheduleDraft.enabled ?? false,
-          cron_expression: scheduleDraft.cron_expression ?? '0 8 * * *',
-          timezone: scheduleDraft.timezone ?? 'UTC',
-        }),
       ]);
 
       await refetchProjects();
@@ -475,7 +463,7 @@ export default function PulseBuilder() {
     return (
       <LegacyMigration
         pulseDraft={pulseDraft}
-        schedule={schedule}
+        schedule={schedules[0] || null}
         exportConfig={existingExport}
         email={existingEmail}
         onConvert={(nodes, edges, configs) => {
@@ -505,6 +493,7 @@ export default function PulseBuilder() {
         isNew={!pulseBuilderPulseId}
         triggerType={(pulseDraft.trigger_type as 'scheduled' | 'action') || 'scheduled'}
         inputVariables={pulseDraft.input_variables as import('../../types/database').PulseInputVariable[] || []}
+        schedules={schedules}
       />
     );
   }
@@ -562,7 +551,7 @@ export default function PulseBuilder() {
             </Button>
           </div>
         </div>
-        <PulseTabs activeTab={activeTab} onChange={setActiveTab} />
+        <PulseTabs activeTab={activeTab} onChange={setActiveTab} showScheduleTab={pulseDraft?.trigger_type !== 'action'} />
       </div>
 
       {error && (
@@ -591,13 +580,22 @@ export default function PulseBuilder() {
             lastRunStatus={pulse?.last_run_status}
           />
         )}
+        {activeTab === 'schedule' && (
+          <ScheduleTab
+            pulseId={pulseBuilderPulseId}
+            schedules={schedules}
+            onSave={saveSchedule}
+            onDelete={deleteSchedule}
+            defaultTimezone={activeCompany?.default_timezone || 'UTC'}
+          />
+        )}
       </div>
 
-      {(schedule || latestExecution || running) && (
+      {(schedules.length > 0 || latestExecution || running) && (
         <div className="px-6 py-2 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
           <div>
-            {schedule
-              ? `Schedule: ${schedule.enabled ? `Active (${schedule.cron_expression})` : 'Disabled'}`
+            {schedules.length > 0
+              ? `Schedule: ${schedules.filter(s => s.enabled).length} active rule(s)`
               : 'Schedule: Not configured'}
           </div>
           <div className="flex items-center gap-2">
