@@ -4,6 +4,7 @@ import { RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import CustomDropdown from '../../components/ui/CustomDropdown';
+import DatePicker from '../../components/ui/DatePicker';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { executeActionForRows, getPromptMappings, executeLinkAction } from './actionExecutor';
@@ -1814,7 +1815,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
-    const result = await executeActionForRows(action, rows, onProgress);
+    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues);
 
     if (action.refresh_after_execute) {
       fetchData();
@@ -2366,7 +2367,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             promptResolveRef.current = () => {};
             return;
           }
-          executeLinkAction(action, rd);
+          executeLinkAction(action, rd, undefined, fixedValues);
           return;
         }
 
@@ -2401,7 +2402,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
         const result = await executeActionForRows(action, rows, (current, total) => {
           setCellProcessing({ name: action.display_name, current, total });
-        });
+        }, undefined, fixedValues);
         setCellProcessing(null);
 
         if (action.refresh_after_execute) {
@@ -2704,7 +2705,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     setPromptDialog(null);
 
     if (action.action_type === 'link') {
-      executeLinkAction(action, rows[0], values);
+      executeLinkAction(action, rows[0], values, fixedValues);
       if (promptResolveRef.current) {
         promptResolveRef.current({ success: 1, failed: 0, pulseTriggered: 0, errors: [] });
         promptResolveRef.current = null;
@@ -2720,7 +2721,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
     }
 
-    const result = await executeActionForRows(action, rows, progressCallback, values);
+    const result = await executeActionForRows(action, rows, progressCallback, values, fixedValues);
 
     if (!onProgress) {
       setCellProcessing(null);
@@ -2889,6 +2890,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                           options={lookupState.options.map(o => ({ value: o.value, label: o.label }))}
                           placeholder="Select a value..."
                           size="sm"
+                          searchable
                         />
                       )}
                     </div>
@@ -2911,6 +2913,13 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                           { value: 'false', label: 'False' },
                         ]}
                         placeholder="Select..."
+                        size="sm"
+                      />
+                    ) : vt === 'date' ? (
+                      <DatePicker
+                        value={promptDialog.values[m.parameterName] || ''}
+                        onChange={(val) => handlePromptValueChange(m.parameterName, val)}
+                        placeholder="Select date"
                         size="sm"
                       />
                     ) : (
