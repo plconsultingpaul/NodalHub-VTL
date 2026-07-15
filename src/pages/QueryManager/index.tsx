@@ -757,7 +757,19 @@ export default function QueryManager() {
       const exec = await response.json();
       const updates: Partial<Query> = {};
 
-      if (exec.dbConnectionId) updates.nodal_db_connection_id = exec.dbConnectionId;
+      if (exec.dbConnectionId) {
+        const matchedDb = nodalDatabases.find(db => db.connection_id === exec.dbConnectionId);
+        if (matchedDb) {
+          updates.nodal_db_connection_id = matchedDb.connection_id;
+        } else {
+          const matchedByName = nodalDatabases.find(db => db.name === exec.dbConnectionId || db.id === exec.dbConnectionId);
+          if (matchedByName) {
+            updates.nodal_db_connection_id = matchedByName.connection_id;
+          } else {
+            console.warn('[Refresh] dbConnectionId from API does not match any known nodal_database:', exec.dbConnectionId);
+          }
+        }
+      }
       if (exec.sqlQueryText) updates.sql_query_text = exec.sqlQueryText;
       if (exec.procName) updates.proc_name = exec.procName;
       if (exec.resultColumns && Array.isArray(exec.resultColumns)) {
@@ -937,7 +949,7 @@ export default function QueryManager() {
                         <div className="flex items-center gap-2 text-sm">
                           {query.query_type === 'sql' || query.query_type === 'stored_procedure' ? (
                             <span className="text-gray-500 dark:text-gray-400">
-                              {query.nodal_db_connection_id || 'No DB'}
+                              {nodalDatabases.find(db => db.connection_id === query.nodal_db_connection_id)?.name || query.nodal_db_connection_id || 'No DB'}
                             </span>
                           ) : (
                             <>
