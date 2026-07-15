@@ -383,7 +383,7 @@ export default function ImportNodalModal({
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 font-mono text-xs">
-                          {exec.dbConnectionId || '-'}
+                          {nodalDatabases.find(db => db.connection_id === exec.dbConnectionId)?.name || exec.dbConnectionId || '-'}
                         </td>
                         <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
                           {exec.description || '-'}
