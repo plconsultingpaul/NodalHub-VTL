@@ -60,16 +60,16 @@ Deno.serve(async (req: Request) => {
     const results: Array<Record<string, unknown>> = [];
     let invokedCount = 0;
 
-    // --- V1: Legacy pulse_schedules table ---
+    // --- V1: pulse_schedules table (supports multiple schedules per pulse) ---
     const { data: schedules, error: schedError } = await admin
       .from("pulse_schedules")
-      .select("pulse_id, cron_expression, timezone, next_run_at, enabled")
+      .select("id, pulse_id, cron_expression, timezone, next_run_at, enabled, label")
       .eq("enabled", true);
 
     if (schedError) throw schedError;
 
     if (schedules && schedules.length > 0) {
-      const pulseIds = schedules.map((s) => s.pulse_id);
+      const pulseIds = [...new Set(schedules.map((s) => s.pulse_id))];
       const { data: activePulses, error: pulseError } = await admin
         .from("pulses")
         .select("id, workflow_version")
@@ -78,7 +78,6 @@ Deno.serve(async (req: Request) => {
 
       if (pulseError) throw pulseError;
 
-      // Only run v1 pulses from pulse_schedules (v2 pulses use step_configs)
       const v1ActiveIds = new Set(
         (activePulses || []).filter((p) => (p.workflow_version || 1) === 1).map((p) => p.id)
       );
@@ -89,6 +88,10 @@ Deno.serve(async (req: Request) => {
         return new Date(s.next_run_at) <= now;
       });
 
+      // Deduplication: only invoke each pulse once per scheduler run,
+      // even if multiple schedule rules fire at the same time
+      const invokedPulses = new Set<string>();
+
       for (const s of due) {
         const next = computeNextRun(s.cron_expression, s.timezone);
         const updatePayload: Record<string, unknown> = {
@@ -96,11 +99,16 @@ Deno.serve(async (req: Request) => {
           updated_at: now.toISOString(),
         };
         if (next) updatePayload.next_run_at = next.toISOString();
-        await admin.from("pulse_schedules").update(updatePayload).eq("pulse_id", s.pulse_id);
+        await admin.from("pulse_schedules").update(updatePayload).eq("id", s.id);
 
-        const invocationResult = await invokePulseRunner(supabaseUrl, serviceKey, s.pulse_id);
-        results.push({ pulseId: s.pulse_id, version: 1, scheduled_next: next?.toISOString() ?? null, invocation: invocationResult });
-        invokedCount++;
+        if (!invokedPulses.has(s.pulse_id)) {
+          invokedPulses.add(s.pulse_id);
+          const invocationResult = await invokePulseRunner(supabaseUrl, serviceKey, s.pulse_id);
+          results.push({ pulseId: s.pulse_id, scheduleId: s.id, label: s.label, version: 1, scheduled_next: next?.toISOString() ?? null, invocation: invocationResult });
+          invokedCount++;
+        } else {
+          results.push({ pulseId: s.pulse_id, scheduleId: s.id, label: s.label, version: 1, scheduled_next: next?.toISOString() ?? null, skipped: "already_invoked_this_cycle" });
+        }
       }
     }
 
@@ -115,7 +123,6 @@ Deno.serve(async (req: Request) => {
 
     for (const p of v2Pulses || []) {
       const stepConfigs = (p.step_configs || {}) as Record<string, Record<string, unknown>>;
-      // Find trigger config
       const triggerConfig = Object.values(stepConfigs).find(
         (c) => c.stepType === "trigger"
       );
@@ -124,7 +131,6 @@ Deno.serve(async (req: Request) => {
       const cronExpr = triggerConfig.cronExpression as string;
       const timezone = (triggerConfig.timezone as string) || "UTC";
 
-      // Check if due based on last_run_at
       if (p.last_run_at) {
         const lastRun = new Date(p.last_run_at);
         const nextAfterLast = computeNextRunAfter(cronExpr, timezone, lastRun);
