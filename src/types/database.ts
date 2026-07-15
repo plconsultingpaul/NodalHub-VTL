@@ -50,6 +50,7 @@ export interface Database {
           secondary_color: string;
           sidebar_text_color: string;
           login_logo_size: number | null;
+          default_timezone: string;
           created_at: string;
           updated_at: string;
         };
@@ -61,6 +62,7 @@ export interface Database {
           secondary_color?: string;
           sidebar_text_color?: string;
           login_logo_size?: number | null;
+          default_timezone?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -72,6 +74,7 @@ export interface Database {
           secondary_color?: string;
           sidebar_text_color?: string;
           login_logo_size?: number | null;
+          default_timezone?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -750,7 +753,9 @@ export interface Database {
       };
       pulse_schedules: {
         Row: {
+          id: string;
           pulse_id: string;
+          label: string;
           enabled: boolean;
           cron_expression: string;
           timezone: string;
@@ -759,7 +764,9 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
+          id?: string;
           pulse_id: string;
+          label?: string;
           enabled?: boolean;
           cron_expression?: string;
           timezone?: string;
@@ -768,7 +775,9 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          id?: string;
           pulse_id?: string;
+          label?: string;
           enabled?: boolean;
           cron_expression?: string;
           timezone?: string;
@@ -1151,7 +1160,7 @@ export type ActionMappingValueType = 'text' | 'date' | 'integer' | 'double' | 'b
 
 export interface ActionParameterMapping {
   parameterName: string;
-  target: 'column' | 'hardcode' | 'prompt' | 'lookup';
+  target: 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value';
   columnName: string;
   hardcodeValue?: string;
   valueType?: ActionMappingValueType;
