@@ -822,6 +822,7 @@ interface DashboardCellProps {
   onGroupByChange?: (groupBy: string[]) => void;
   onActionComplete?: (actionName: string, result: { success: number; failed: number; pulseTriggered?: number; errors?: string[] }) => void;
   onPopupAction?: (title: string, template: string, rowData: Record<string, unknown>) => void;
+  companyTimezone?: string;
 }
 
 export type { ActionProgressCallback };
@@ -927,10 +928,9 @@ const substitutePathParameters = (path: string, userParams: UserParameter[], par
 };
 
 const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function DashboardCell(
-  { cell, onRecordCount, parameterValues = {}, activeTemplate, templateId, onColumnChange, onColumnsDetected, onDrilldownColumnsDetected, formattingRules = {}, onGroupByChange, onActionComplete, onPopupAction },
+  { cell, onRecordCount, parameterValues = {}, activeTemplate, templateId, onColumnChange, onColumnsDetected, onDrilldownColumnsDetected, formattingRules = {}, onGroupByChange, onActionComplete, onPopupAction, companyTimezone },
   ref
 ) {
-  console.log('[DashboardCell] Rendering cell:', cell.id, cell.title, 'query:', cell.queries, 'parameterValues:', parameterValues);
 
   const tableRef = useRef<HTMLDivElement>(null);
   const tabulatorRef = useRef<Tabulator | null>(null);
@@ -1089,10 +1089,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         const templateColumns = savedConfig.columns || [];
         const templateMap = new Map(templateColumns.map(tc => [tc.field, tc]));
 
-        console.log('[renderInlineDrilldown] Drilldown:', drilldown.id);
-        console.log('[renderInlineDrilldown] activeTemplateRef.current?.drilldowns:', JSON.stringify(currentTemplate?.drilldowns));
-        console.log('[renderInlineDrilldown] templateDrilldownConfig:', JSON.stringify(templateDrilldownConfig));
-        console.log('[renderInlineDrilldown] savedConfig:', JSON.stringify(savedConfig));
 
         const keys = Object.keys(drillData[0]).filter(k => !k.startsWith('_'));
         const sortedKeys = [...keys].sort((a, b) => {
@@ -1127,9 +1123,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                 element.style.color = '#dc2626';
               }
             } else if (merged.dateFormat) {
-              console.log('[drilldownFormatter] Date column detected:', { rawValue: value, valueType: typeof value, dateFormat: merged.dateFormat });
-              const formatted = formatDateValue(value, merged.dateFormat);
-              console.log('[drilldownFormatter] Date formatted result:', { rawValue: value, formatted });
+              const formatted = formatDateValue(value, merged.dateFormat, companyTimezone);
               element.textContent = formatted !== null ? formatted : (value !== null && value !== undefined ? String(value) : '');
             } else {
               element.textContent = value !== null && value !== undefined ? String(value) : '';
@@ -1167,7 +1161,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         const columns: Tabulator.ColumnDefinition[] = sortedKeys.map(key => {
           const tc = templateMap.get(key);
           const hasSavedWidth = tc?.width && tc.width > 0;
-          console.log('[renderInlineDrilldown] Column:', key, 'tc.width:', tc?.width, 'hasSavedWidth:', hasSavedWidth);
 
           const colFormatting = drilldownColumnFormattings[key] || {};
           const displayName = colFormatting.displayName || tc?.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -1191,8 +1184,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         hasContent = true;
 
         const hasTemplateSavedWidths = columns.some(col => col.width !== undefined);
-        console.log('[renderInlineDrilldown] Columns definition being passed to Tabulator:', JSON.stringify(columns));
-        console.log('[renderInlineDrilldown] hasTemplateSavedWidths:', hasTemplateSavedWidths);
 
         pendingTabulatorInits.push({
           container: tableContainer,
@@ -1220,7 +1211,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       const columnsForTabulator = columns.map(col => {
         const { widthGrow, widthShrink, ...rest } = col;
         if (col.width) {
-          console.log(`[renderInlineDrilldown] Using pixel width for ${col.field}: ${col.width}px`);
         }
         return rest;
       });
@@ -1238,7 +1228,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
       drilldownTabulator.on('tableBuilt', () => {
         const cols = drilldownTabulator.getColumns();
-        console.log('[renderInlineDrilldown] tableBuilt - actual column widths:');
         cols.forEach(col => {
           console.log(`  ${col.getField()}: ${col.getWidth()}px`);
         });
@@ -1331,7 +1320,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     const drilldownConfigs: Record<string, { columns: GridTemplateColumn[] }> = {};
     const seenDrilldowns = new Set<string>();
 
-    console.log('[getColumnConfig] Collecting drilldown configs, drilldownTabulatorsRef.current.size:', drilldownTabulatorsRef.current.size);
 
     drilldownTabulatorsRef.current.forEach((entry, key) => {
       const parts = key.split('-');
@@ -1343,13 +1331,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           const containerWidth = entry.container.clientWidth || 0;
           const drilldownConfig: GridTemplateColumn[] = [];
 
-          console.log('[getColumnConfig] Processing drilldown:', drilldownId, 'containerWidth:', containerWidth);
 
           drilldownColumns.forEach((col, index) => {
             const field = col.getField();
             if (field && !field.startsWith('_')) {
               const pixelWidth = col.getWidth();
-              console.log('[getColumnConfig] Drilldown column:', field, 'pixelWidth:', pixelWidth);
               drilldownConfig.push({
                 field,
                 position: index,
@@ -1361,13 +1347,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
           if (drilldownConfig.length > 0) {
             drilldownConfigs[drilldownId] = { columns: drilldownConfig };
-            console.log('[getColumnConfig] Drilldown config for', drilldownId, ':', JSON.stringify(drilldownConfig));
           }
         }
       }
     });
 
-    console.log('[getColumnConfig] Final drilldownConfigs:', JSON.stringify(drilldownConfigs));
 
     const result: GridTemplateCellColumnConfig = { columns: config };
     if (Object.keys(drilldownConfigs).length > 0) {
@@ -1438,26 +1422,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
     }
 
-    console.log('[DashboardCell] executeQuery called:', {
-      query,
-      linkValue,
-      linkField,
-      parameterMappings,
-      url_query_string: query.url_query_string,
-      api_sub_path: query.api_sub_path,
-      parameterValues: currentParams
-    });
 
     const endpointId = query.api_endpoint_id;
     if (!endpointId) {
-      console.log('[DashboardCell] No endpoint ID in query');
       return [];
     }
 
     const ep = await fetchEndpoint(endpointId);
-    console.log('[DashboardCell] Fetched endpoint:', ep);
     if (!ep) {
-      console.log('[DashboardCell] No endpoint found for ID:', endpointId);
       return [];
     }
 
@@ -1486,7 +1458,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
 
       const ncBody = { name: query.name, inputs };
-      console.log('[DashboardCell] NC execution:', { url: ncUrl, body: ncBody });
 
       const ncResponse = await proxyFetch(ncUrl, {
         method: 'POST',
@@ -1501,7 +1472,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
 
       const ncResult = await ncResponse.json();
-      console.log('[DashboardCell] NC raw response:', ncResult);
 
       const rows = ncResult?.result?.rows || ncResult?.rows || (Array.isArray(ncResult) ? ncResult : []);
       if (Array.isArray(rows) && rows.length > 0 && typeof rows[0] === 'object' && rows[0] !== null) {
@@ -1517,14 +1487,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     const baseUrl = ep.url.replace(/\/$/, '');
     const userParams = (query.user_parameters as UserParameter[]) || [];
     const substitutedSubPath = substitutePathParameters(query.api_sub_path, userParams, currentParams);
-    console.log('[DashboardCell] Path substitution:', { original: query.api_sub_path, substituted: substitutedSubPath });
     const normalizedSubPath = substitutedSubPath.replace(/^\//, '').replace(/\/$/, '');
     let url = normalizedSubPath ? `${baseUrl}/${normalizedSubPath}` : baseUrl;
 
     const queryParams = query.query_parameters as Array<{ key: string; value: string; enabled: boolean }> | null;
     const enabledParams = queryParams?.filter(p => p.enabled && p.value);
-    console.log('[DashboardCell] query_parameters:', queryParams);
-    console.log('[DashboardCell] enabledParams:', enabledParams);
 
     let queryString = '';
     if (enabledParams && enabledParams.length > 0) {
@@ -1534,10 +1501,8 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           return `${encodeURIComponent(p.key)}=${encodeURIComponent(substitutedValue)}`;
         })
         .join('&');
-      console.log('[DashboardCell] Using query_parameters, built string:', queryString);
     } else if (query.url_query_string) {
       queryString = substituteUserParameters(query.url_query_string, currentParams);
-      console.log('[DashboardCell] Using url_query_string:', queryString);
     }
 
     if (linkValue && linkField) {
@@ -1547,7 +1512,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     if (queryString) {
       url += `?${queryString}`;
     }
-    console.log('[DashboardCell] Final URL with query string:', url);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -1578,17 +1542,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       const requestBody = buildRequestBody(query.request_body_template, fieldMappings, currentParams);
       if (requestBody) {
         fetchOptions.body = JSON.stringify(requestBody);
-        console.log('[DashboardCell] Request body:', requestBody);
       }
     }
 
-    console.log('[DashboardCell] Fetching URL:', url, 'method:', query.http_method);
     const response = await proxyFetch(url, {
       method: query.http_method,
       headers,
       body: fetchOptions.body as string | undefined,
     });
-    console.log('[DashboardCell] Response status:', response.status, response.statusText);
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
@@ -1597,45 +1558,35 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     }
 
     const result = await response.json();
-    console.log('[DashboardCell] Raw API response:', result);
 
     if (Array.isArray(result)) {
-      console.log('[DashboardCell] Result is array, length:', result.length);
       return result;
     }
     if (result.data && Array.isArray(result.data)) {
-      console.log('[DashboardCell] Found data property, length:', result.data.length);
       return result.data;
     }
     if (result.results && Array.isArray(result.results)) {
-      console.log('[DashboardCell] Found results property, length:', result.results.length);
       return result.results;
     }
     if (result.items && Array.isArray(result.items)) {
-      console.log('[DashboardCell] Found items property, length:', result.items.length);
       return result.items;
     }
     if (result.value && Array.isArray(result.value)) {
-      console.log('[DashboardCell] Found value property, length:', result.value.length);
       return result.value;
     }
     const arrayProp = Object.keys(result).find(key => Array.isArray(result[key]));
     if (arrayProp) {
-      console.log('[DashboardCell] Found array property:', arrayProp, 'length:', result[arrayProp].length);
       return result[arrayProp];
     }
-    console.log('[DashboardCell] No array found, wrapping result as single-item array');
     return [result];
   }, [fetchEndpoint]);
 
   const checkDrilldownExistence = useCallback(async (parentData: RowData[]) => {
     if (!cell.drilldowns || cell.drilldowns.length === 0 || parentData.length === 0) {
-      console.log('[DashboardCell] No drilldowns to check or no parent data');
       setDrilldownAvailability(new Set());
       return;
     }
 
-    console.log('[DashboardCell] Checking drilldown existence for', parentData.length, 'rows');
     const rowsWithDrilldowns = new Set<number>();
 
     for (const drilldown of cell.drilldowns) {
@@ -1646,11 +1597,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       const mappedField = Object.values(paramMappings)[0] || drilldown.link_field;
 
       if (!mappedField) {
-        console.log('[DashboardCell] No mapped field for drilldown:', drilldown.display_name);
         continue;
       }
 
-      console.log('[DashboardCell] Checking drilldown:', drilldown.display_name, 'mappedField:', mappedField);
 
       for (let rowIndex = 0; rowIndex < parentData.length; rowIndex++) {
         const rowData = parentData[rowIndex];
@@ -1676,20 +1625,16 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             rowsWithDrilldowns.add(rowIndex);
           }
         } catch (err) {
-          console.warn('[DashboardCell] Existence check failed for row', rowIndex, ':', err instanceof Error ? err.message : err);
         }
       }
     }
 
-    console.log('[DashboardCell] Rows with drilldowns:', Array.from(rowsWithDrilldowns));
     setDrilldownAvailability(rowsWithDrilldowns);
   }, [cell.drilldowns, executeQuery]);
 
   const fetchData = useCallback(async () => {
-    console.log('[DashboardCell] fetchData called for cell:', cell.id);
     const query = cell.queries;
     if (!query) {
-      console.log('[DashboardCell] No query configured for cell:', cell.id);
       setError('No query configured');
       return;
     }
@@ -1721,7 +1666,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
     try {
       const result = await executeQuery(query);
-      console.log('[DashboardCell] fetchData result:', result?.length, 'rows');
       setData(result);
       onRecordCount?.(result.length);
 
@@ -1977,15 +1921,12 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   toggleRowRef.current = toggleRow;
 
   useEffect(() => {
-    console.log('[DashboardCell] Tabulator effect triggered, data.length:', data.length, 'tableRef:', !!tableRef.current, 'templateId:', templateId);
 
     if (!tableRef.current || data.length === 0) {
-      console.log('[DashboardCell] Skipping Tabulator init:', { hasTableRef: !!tableRef.current, dataLength: data.length });
       return;
     }
 
     if (tabulatorRef.current) {
-      console.log('[DashboardCell] Destroying existing Tabulator instance');
       tabulatorRef.current.destroy();
     }
 
@@ -2009,7 +1950,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     }
 
     const firstRow = data[0];
-    console.log('[DashboardCell] First row keys:', Object.keys(firstRow));
     const columns: Tabulator.ColumnDefinition[] = [];
 
     if (cell.enable_row_selection) {
@@ -2249,9 +2189,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             element.style.color = '#dc2626';
           }
         } else if (merged.dateFormat) {
-          console.log('[buildCellFormatter] Date column detected:', { field, rawValue: value, valueType: typeof value, dateFormat: merged.dateFormat });
-          const formatted = formatDateValue(value, merged.dateFormat);
-          console.log('[buildCellFormatter] Date formatted result:', { field, rawValue: value, formatted });
+          const formatted = formatDateValue(value, merged.dateFormat, companyTimezone);
           element.textContent = formatted !== null ? formatted : (value !== null && value !== undefined ? String(value) : '');
         } else {
           element.textContent = value !== null && value !== undefined ? String(value) : '';
@@ -2547,7 +2485,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       columns.push(colDef);
     });
 
-    console.log('[DashboardCell] Creating Tabulator with columns:', columns.map(c => c.field));
     let groupByFields = currentFormattingRules.groupBy || [];
     let groupStartOpen: boolean | ((value: string) => boolean) = true;
     if (groupByFields.length === 0 && cell.auto_group_by_column) {
@@ -2622,7 +2559,6 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
-    console.log('[DashboardCell] Tabulator created successfully');
 
     return () => {
       if (columnChangeDebounceRef.current) {

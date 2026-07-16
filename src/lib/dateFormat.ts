@@ -3,21 +3,64 @@ const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+const TZ_ALIASES: Record<string, string> = {
+  'UTC': 'UTC',
+  'US/Eastern': 'America/New_York',
+  'US/Central': 'America/Chicago',
+  'US/Mountain': 'America/Denver',
+  'US/Pacific': 'America/Los_Angeles',
+  'Europe/London': 'Europe/London',
+  'Europe/Paris': 'Europe/Paris',
+  'Asia/Tokyo': 'Asia/Tokyo',
+  'Australia/Sydney': 'Australia/Sydney',
+};
+
+function resolveTimezone(tz: string): string {
+  return TZ_ALIASES[tz] || tz || 'UTC';
+}
+
 function pad(n: number, len = 2): string {
   return String(n).padStart(len, '0');
+}
+
+function hasTimezoneIndicator(str: string): boolean {
+  return /Z|[+-]\d{2}:\d{2}/.test(str);
+}
+
+function getPartsInTimezone(date: Date, tz: string): { y: number; m: number; d: number; h24: number; min: number; sec: number } {
+  const ianaZone = resolveTimezone(tz);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ianaZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '0';
+
+  return {
+    y: parseInt(get('year')),
+    m: parseInt(get('month')) - 1,
+    d: parseInt(get('day')),
+    h24: parseInt(get('hour')) % 24,
+    min: parseInt(get('minute')),
+    sec: parseInt(get('second')),
+  };
 }
 
 function parseRawDate(str: string): { y: number; m: number; d: number; h24: number; min: number; sec: number } | null {
   // ISO 8601: 2024-01-15T09:30:00Z or 2024-01-15T09:30:00+05:00 or 2024-01-15T09:30:00
   const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (iso) {
-    console.log('[parseRawDate] Matched ISO pattern:', { input: str, groups: iso.slice(1) });
     return { y: +iso[1], m: +iso[2] - 1, d: +iso[3], h24: +iso[4], min: +iso[5], sec: +(iso[6] || 0) };
   }
   // Date only: 2024-01-15
   const dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (dateOnly) {
-    console.log('[parseRawDate] Matched date-only pattern:', { input: str });
     return { y: +dateOnly[1], m: +dateOnly[2] - 1, d: +dateOnly[3], h24: 0, min: 0, sec: 0 };
   }
   // DD/MM/YYYY or MM/DD/YYYY with optional time - parse as raw positional
@@ -28,44 +71,36 @@ function parseRawDate(str: string): { y: number; m: number; d: number; h24: numb
     if (yr < 100) yr += 2000;
     const day = p1 > 12 ? p1 : p2 > 12 ? p2 : p1;
     const mon = p1 > 12 ? p2 : p2 > 12 ? p1 : p2;
-    console.log('[parseRawDate] Matched slashed pattern:', { input: str, p1, p2, yr, day, mon, h24: +(slashed[4] || 0), min: +(slashed[5] || 0) });
     return { y: yr, m: mon - 1, d: day, h24: +(slashed[4] || 0), min: +(slashed[5] || 0), sec: +(slashed[6] || 0) };
   }
-  console.warn('[parseRawDate] NO MATCH for input:', JSON.stringify(str), 'charCodes:', Array.from(str.slice(0, 30)).map(c => c.charCodeAt(0)));
   return null;
 }
 
 function dayOfWeek(y: number, m: number, d: number): number {
-  // Zeller-like: m is 0-indexed
   const t = new Date(y, m, d);
   return t.getDay();
 }
 
-export function formatDateValue(value: unknown, format: string): string | null {
+export function formatDateValue(value: unknown, format: string, timezone?: string): string | null {
   if (value === null || value === undefined || value === '') return null;
   const str = String(value).trim();
 
-  console.log('[formatDateValue] INPUT:', { raw: value, trimmed: str, format });
+  // If the string has a timezone indicator (Z or +/-offset), convert to the target timezone
+  if (timezone && hasTimezoneIndicator(str)) {
+    const date = new Date(str);
+    if (isNaN(date.getTime())) return null;
+    const parts = getPartsInTimezone(date, timezone);
+    return formatParts(format, parts.y, parts.m, parts.d, parts.h24, parts.min, parts.sec);
+  }
 
+  // No timezone indicator or no target timezone: extract raw components as-is
   const parsed = parseRawDate(str);
   if (!parsed) {
-    console.warn('[formatDateValue] parseRawDate FAILED to match. Falling back to new Date(). Input:', JSON.stringify(str));
     const date = new Date(str);
-    if (isNaN(date.getTime())) {
-      console.warn('[formatDateValue] new Date() also invalid for:', str);
-      return null;
-    }
-    console.warn('[formatDateValue] FALLBACK PATH - new Date() parsed as:', {
-      localHours: date.getHours(),
-      utcHours: date.getUTCHours(),
-      isoString: date.toISOString(),
-      timezoneOffset: date.getTimezoneOffset(),
-      note: 'Using getUTC* which may SHIFT the time if input was parsed as local!'
-    });
+    if (isNaN(date.getTime())) return null;
     return formatParts(format, date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
   }
 
-  console.log('[formatDateValue] parseRawDate MATCHED:', parsed);
   return formatParts(format, parsed.y, parsed.m, parsed.d, parsed.h24, parsed.min, parsed.sec);
 }
 

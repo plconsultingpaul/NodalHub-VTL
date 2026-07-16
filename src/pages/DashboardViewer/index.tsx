@@ -109,17 +109,6 @@ export default function DashboardViewer() {
     return () => document.removeEventListener('mousedown', handler);
   }, [exportDropdownCellId]);
 
-  useEffect(() => {
-    console.log('[DashboardViewer] Template Debug:', {
-      activeDashboardId,
-      templatesCount: templates.length,
-      templates: templates.map(t => ({ id: t.id, name: t.name, is_default: t.is_default })),
-      templatesLoading,
-      selectedTemplateId,
-      cellsCount: cells.length,
-      cellIds: cells.map(c => c.id)
-    });
-  }, [activeDashboardId, templates, templatesLoading, selectedTemplateId, cells]);
 
   useEffect(() => {
     if (!templatesLoading && templates.length > 0 && !selectedTemplateId && !userClearedTemplateRef.current) {
@@ -131,9 +120,6 @@ export default function DashboardViewer() {
   }, [templates, templatesLoading, selectedTemplateId, getDefaultTemplate]);
 
   useEffect(() => {
-    console.log('[DashboardViewer] RESET EFFECT triggered - activeDashboardId changed to:', activeDashboardId);
-    console.log('[DashboardViewer] RESET EFFECT - cells at this moment:', cells.length, 'cell IDs:', cells.map(c => c.id));
-    console.log('[DashboardViewer] RESET EFFECT - loading state:', loading);
     setSelectedTemplateId(null);
     setHasColumnChanges(false);
     setParameterValues({});
@@ -143,7 +129,6 @@ export default function DashboardViewer() {
     setParametersReady(false);
     initialParamsSetRef.current = null;
     userClearedTemplateRef.current = false;
-    console.log('[DashboardViewer] RESET EFFECT - cleared all parameter state, ref set to null');
   }, [activeDashboardId]);
 
   const selectedTemplate = useMemo(() => {
@@ -181,22 +166,12 @@ export default function DashboardViewer() {
   const handleSave = useCallback(async () => {
     if (cells.length === 0) return;
 
-    console.log('[handleSave] Starting save...');
     const columnConfig = collectAllCellConfigs();
-    console.log('[handleSave] columnConfig:', JSON.stringify(columnConfig, null, 2));
-
-    Object.entries(columnConfig.cells || {}).forEach(([cellId, cellConfig]) => {
-      if (cellConfig.drilldowns) {
-        console.log('[handleSave] Cell', cellId, 'drilldowns:', JSON.stringify(cellConfig.drilldowns, null, 2));
-      }
-    });
 
     const formattingRules = collectAllFormattingRules();
 
     if (selectedTemplateId) {
-      console.log('[handleSave] Updating template:', selectedTemplateId);
       await updateTemplate(selectedTemplateId, columnConfig, formattingRules);
-      console.log('[handleSave] Template updated');
     } else {
       await createTemplate('Default', columnConfig, formattingRules, true);
     }
@@ -279,7 +254,6 @@ export default function DashboardViewer() {
   }, []);
 
   const handleActionComplete = useCallback((actionName: string, result: { success: number; failed: number; pulseTriggered?: number; errors?: string[] }) => {
-    console.log('[DashboardViewer] handleActionComplete:', actionName, JSON.stringify(result), 'activeCompany:', activeCompany?.id);
     if (result.failed === 0) {
       const pulseNote = result.pulseTriggered ? ' Pulse triggered.' : '';
       addToast({
@@ -348,7 +322,6 @@ export default function DashboardViewer() {
         });
       });
 
-      console.log('[DashboardViewer] Action result:', action.display_name, JSON.stringify(result));
 
       if (result.success === 0 && result.failed === 0) {
         updateToast(toastId, {
@@ -559,48 +532,26 @@ export default function DashboardViewer() {
     await updateFormattingRules(selectedTemplateId, updatedRules);
   }, [selectedTemplateId, selectedTemplate, updateFormattingRules]);
 
-  console.log('[DashboardViewer] Render state:', {
-    activeDashboardId,
-    activeDashboard: activeDashboard?.dashboard?.name,
-    cellsCount: cells.length,
-    loading
-  });
-
   useEffect(() => {
-    console.log('[DashboardViewer] PARAM EFFECT triggered');
-    console.log('[DashboardViewer] PARAM EFFECT - activeDashboardId:', activeDashboardId);
-    console.log('[DashboardViewer] PARAM EFFECT - loading:', loading);
-    console.log('[DashboardViewer] PARAM EFFECT - cells.length:', cells.length);
-    console.log('[DashboardViewer] PARAM EFFECT - cell IDs:', cells.map(c => c.id));
-    console.log('[DashboardViewer] PARAM EFFECT - cell dashboard_ids:', cells.map(c => c.dashboard_id));
-    console.log('[DashboardViewer] PARAM EFFECT - initialParamsSetRef.current:', initialParamsSetRef.current);
-
     if (loading || cells.length === 0) {
-      console.log('[DashboardViewer] PARAM EFFECT - EARLY RETURN: loading or no cells');
       return;
     }
     if (initialParamsSetRef.current === activeDashboardId) {
-      console.log('[DashboardViewer] PARAM EFFECT - EARLY RETURN: ref matches activeDashboardId');
       return;
     }
 
     const cellsBelongToCurrentDashboard = cells.every(cell => cell.dashboard_id === activeDashboardId);
     if (!cellsBelongToCurrentDashboard) {
-      console.log('[DashboardViewer] PARAM EFFECT - EARLY RETURN: cells belong to different dashboard (stale data)');
       return;
     }
-
-    console.log('[DashboardViewer] PARAM EFFECT - PROCEEDING to extract parameters from cells');
 
     const allParams: UserParameter[] = [];
     const seenNames = new Set<string>();
 
     cells.forEach(cell => {
       const query = cell.queries;
-      console.log('[DashboardViewer] PARAM EFFECT - Processing cell:', cell.id, 'dashboard_id:', cell.dashboard_id, 'query:', query?.name);
       if (query?.user_parameters) {
         const params = query.user_parameters as UserParameter[];
-        console.log('[DashboardViewer] PARAM EFFECT - Cell', cell.id, 'has params:', params.map(p => p.name));
         params.forEach(p => {
           if (!seenNames.has(p.name)) {
             seenNames.add(p.name);
@@ -609,8 +560,6 @@ export default function DashboardViewer() {
         });
       }
     });
-
-    console.log('[DashboardViewer] PARAM EFFECT - Extracted params:', allParams.map(p => p.name));
 
     const fvMap: Record<string, FixedValue> = {};
     const defaultValues: Record<string, string> = {};
@@ -639,25 +588,21 @@ export default function DashboardViewer() {
       }
     });
 
-    console.log('[DashboardViewer] PARAM EFFECT - Setting initialParamsSetRef.current to:', activeDashboardId);
     initialParamsSetRef.current = activeDashboardId ?? null;
 
     const previouslySubmittedParams = activeDashboardId ? submittedDashboardParamsRef.current[activeDashboardId] : null;
 
     if (previouslySubmittedParams && allParams.length > 0) {
-      console.log('[DashboardViewer] PARAM EFFECT - Restoring previously submitted params for dashboard:', activeDashboardId);
       setParameterValues(previouslySubmittedParams);
       setPendingGlobalParamValues(previouslySubmittedParams);
       setParametersReady(true);
     } else if (allParams.length > 0) {
-      console.log('[DashboardViewer] PARAM EFFECT - Showing param modal, params found:', allParams.length);
       setParameterValues(defaultValues);
       setPendingGlobalParamValues(defaultValues);
       setShowParamModal(true);
       setParametersReady(false);
       if (activeDashboardId) fetchParameterHistory(activeDashboardId);
     } else {
-      console.log('[DashboardViewer] PARAM EFFECT - No params, setting parametersReady=true');
       setParametersReady(true);
     }
   }, [cells, loading, activeDashboardId, fixedValues, resolveLookup]);
@@ -1587,6 +1532,7 @@ export default function DashboardViewer() {
                       onGroupByChange={(groupBy) => handleGroupByChange(cell.id, groupBy)}
                       onActionComplete={handleActionComplete}
                       onPopupAction={handlePopupAction}
+                      companyTimezone={activeCompany?.default_timezone}
                     />
                   )}
                 </div>
@@ -1757,6 +1703,7 @@ export default function DashboardViewer() {
                             onGroupByChange={(groupBy) => handleGroupByChange(cell.id, groupBy)}
                             onActionComplete={handleActionComplete}
                             onPopupAction={handlePopupAction}
+                            companyTimezone={activeCompany?.default_timezone}
                           />
                         )}
                       </div>
