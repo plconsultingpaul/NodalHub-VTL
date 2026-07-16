@@ -1127,7 +1127,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                 element.style.color = '#dc2626';
               }
             } else if (merged.dateFormat) {
+              console.log('[drilldownFormatter] Date column detected:', { rawValue: value, valueType: typeof value, dateFormat: merged.dateFormat });
               const formatted = formatDateValue(value, merged.dateFormat);
+              console.log('[drilldownFormatter] Date formatted result:', { rawValue: value, formatted });
               element.textContent = formatted !== null ? formatted : (value !== null && value !== undefined ? String(value) : '');
             } else {
               element.textContent = value !== null && value !== undefined ? String(value) : '';
@@ -2247,7 +2249,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             element.style.color = '#dc2626';
           }
         } else if (merged.dateFormat) {
+          console.log('[buildCellFormatter] Date column detected:', { field, rawValue: value, valueType: typeof value, dateFormat: merged.dateFormat });
           const formatted = formatDateValue(value, merged.dateFormat);
+          console.log('[buildCellFormatter] Date formatted result:', { field, rawValue: value, formatted });
           element.textContent = formatted !== null ? formatted : (value !== null && value !== undefined ? String(value) : '');
         } else {
           element.textContent = value !== null && value !== undefined ? String(value) : '';

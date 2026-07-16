@@ -11,11 +11,13 @@ function parseRawDate(str: string): { y: number; m: number; d: number; h24: numb
   // ISO 8601: 2024-01-15T09:30:00Z or 2024-01-15T09:30:00+05:00 or 2024-01-15T09:30:00
   const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (iso) {
+    console.log('[parseRawDate] Matched ISO pattern:', { input: str, groups: iso.slice(1) });
     return { y: +iso[1], m: +iso[2] - 1, d: +iso[3], h24: +iso[4], min: +iso[5], sec: +(iso[6] || 0) };
   }
   // Date only: 2024-01-15
   const dateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (dateOnly) {
+    console.log('[parseRawDate] Matched date-only pattern:', { input: str });
     return { y: +dateOnly[1], m: +dateOnly[2] - 1, d: +dateOnly[3], h24: 0, min: 0, sec: 0 };
   }
   // DD/MM/YYYY or MM/DD/YYYY with optional time - parse as raw positional
@@ -24,11 +26,12 @@ function parseRawDate(str: string): { y: number; m: number; d: number; h24: numb
     const p1 = +slashed[1], p2 = +slashed[2];
     let yr = +slashed[3];
     if (yr < 100) yr += 2000;
-    // If first part > 12, it must be day (DD/MM/YYYY)
     const day = p1 > 12 ? p1 : p2 > 12 ? p2 : p1;
     const mon = p1 > 12 ? p2 : p2 > 12 ? p1 : p2;
+    console.log('[parseRawDate] Matched slashed pattern:', { input: str, p1, p2, yr, day, mon, h24: +(slashed[4] || 0), min: +(slashed[5] || 0) });
     return { y: yr, m: mon - 1, d: day, h24: +(slashed[4] || 0), min: +(slashed[5] || 0), sec: +(slashed[6] || 0) };
   }
+  console.warn('[parseRawDate] NO MATCH for input:', JSON.stringify(str), 'charCodes:', Array.from(str.slice(0, 30)).map(c => c.charCodeAt(0)));
   return null;
 }
 
@@ -42,14 +45,27 @@ export function formatDateValue(value: unknown, format: string): string | null {
   if (value === null || value === undefined || value === '') return null;
   const str = String(value).trim();
 
+  console.log('[formatDateValue] INPUT:', { raw: value, trimmed: str, format });
+
   const parsed = parseRawDate(str);
   if (!parsed) {
-    // Fallback: use Date but with UTC accessors to avoid local timezone shift
+    console.warn('[formatDateValue] parseRawDate FAILED to match. Falling back to new Date(). Input:', JSON.stringify(str));
     const date = new Date(str);
-    if (isNaN(date.getTime())) return null;
+    if (isNaN(date.getTime())) {
+      console.warn('[formatDateValue] new Date() also invalid for:', str);
+      return null;
+    }
+    console.warn('[formatDateValue] FALLBACK PATH - new Date() parsed as:', {
+      localHours: date.getHours(),
+      utcHours: date.getUTCHours(),
+      isoString: date.toISOString(),
+      timezoneOffset: date.getTimezoneOffset(),
+      note: 'Using getUTC* which may SHIFT the time if input was parsed as local!'
+    });
     return formatParts(format, date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
   }
 
+  console.log('[formatDateValue] parseRawDate MATCHED:', parsed);
   return formatParts(format, parsed.y, parsed.m, parsed.d, parsed.h24, parsed.min, parsed.sec);
 }
 
