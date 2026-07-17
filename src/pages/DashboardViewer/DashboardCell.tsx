@@ -542,7 +542,13 @@ function createTitleWithFilter(
       const realValues = Array.from(selectedValues).filter(v => v !== BLANK_SENTINEL);
 
       if (!includesBlank && realValues.length > 0) {
-        table.addFilter(field, 'in', realValues);
+        const filterFunc = (data: Record<string, unknown>) => {
+          const cellValue = data[field];
+          if (cellValue === null || cellValue === undefined || cellValue === '') return false;
+          return realValues.includes(String(cellValue));
+        };
+        columnCustomFilterRef.set(field, filterFunc);
+        table.addFilter(filterFunc);
       } else {
         const filterFunc = (data: Record<string, unknown>) => {
           const cellValue = data[field];
