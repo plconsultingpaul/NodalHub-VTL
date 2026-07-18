@@ -160,7 +160,11 @@ function buildParamValues(
       if (m.fixedValueId && fixedValues) {
         const fv = fixedValues.find(f => f.id === m.fixedValueId);
         if (fv) {
-          paramValues[m.parameterName] = resolveFixedValue(fv);
+          if (fv.is_list && promptValues && promptValues[m.parameterName] !== undefined) {
+            paramValues[m.parameterName] = promptValues[m.parameterName];
+          } else {
+            paramValues[m.parameterName] = resolveFixedValue(fv);
+          }
         }
       }
     } else {
@@ -449,6 +453,15 @@ export async function executeActionForRows(
 export function getPromptMappings(action: DashboardCellActionWithQuery): ActionParameterMapping[] {
   const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
   return mappings.filter(m => m.target === 'prompt' || m.target === 'lookup');
+}
+
+export function getFixedValueListMappings(action: DashboardCellActionWithQuery, fixedValues: FixedValue[]): ActionParameterMapping[] {
+  const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
+  return mappings.filter(m => {
+    if (m.target !== 'fixed_value' || !m.fixedValueId) return false;
+    const fv = fixedValues.find(f => f.id === m.fixedValueId);
+    return fv?.is_list === true;
+  });
 }
 
 export function executeLinkAction(

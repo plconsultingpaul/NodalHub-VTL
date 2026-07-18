@@ -7,7 +7,7 @@ import CustomDropdown from '../../components/ui/CustomDropdown';
 import DatePicker from '../../components/ui/DatePicker';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
-import { executeActionForRows, getPromptMappings, executeLinkAction } from './actionExecutor';
+import { executeActionForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction } from './actionExecutor';
 import type { ActionProgressCallback } from './actionExecutor';
 import type {
   DashboardCellWithRelations,
@@ -1754,12 +1754,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     }
 
     const prompts = getPromptMappings(action);
-    if (prompts.length > 0) {
+    const fvListMappings = getFixedValueListMappings(action, fixedValues);
+    const allPromptMappings = [...prompts, ...fvListMappings];
+    if (allPromptMappings.length > 0) {
       return new Promise((resolve) => {
         setPromptDialog({
           action,
-          mappings: prompts,
-          values: Object.fromEntries(prompts.map(p => [p.parameterName, ''])),
+          mappings: allPromptMappings,
+          values: Object.fromEntries(allPromptMappings.map(p => [p.parameterName, ''])),
           rows,
           onProgress,
         });
@@ -2305,11 +2307,13 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         if (action.action_type === 'link') {
           const rd = cellComp.getRow().getData() as Record<string, unknown>;
           const prompts = getPromptMappings(action);
-          if (prompts.length > 0) {
+          const fvListMappings = getFixedValueListMappings(action, fixedValues);
+          const allPromptMappings = [...prompts, ...fvListMappings];
+          if (allPromptMappings.length > 0) {
             setPromptDialog({
               action,
-              mappings: prompts,
-              values: Object.fromEntries(prompts.map(p => [p.parameterName, ''])),
+              mappings: allPromptMappings,
+              values: Object.fromEntries(allPromptMappings.map(p => [p.parameterName, ''])),
               rows: [rd],
             });
             promptResolveRef.current = () => {};
@@ -2334,11 +2338,13 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         }
 
         const prompts = getPromptMappings(action);
-        if (prompts.length > 0) {
+        const fvListMappings = getFixedValueListMappings(action, fixedValues);
+        const allPromptMappings = [...prompts, ...fvListMappings];
+        if (allPromptMappings.length > 0) {
           setPromptDialog({
             action,
-            mappings: prompts,
-            values: Object.fromEntries(prompts.map(p => [p.parameterName, ''])),
+            mappings: allPromptMappings,
+            values: Object.fromEntries(allPromptMappings.map(p => [p.parameterName, ''])),
             rows,
           });
           promptResolveRef.current = (result) => {
@@ -2811,6 +2817,28 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                 const inputType = vt === 'date' ? 'date' : vt === 'integer' || vt === 'double' ? 'number' : 'text';
                 const inputStep = vt === 'double' ? '0.01' : undefined;
                 const isLookupMapping = m.target === 'lookup' && (m.lookupQueryId || m.fixedValueId);
+                const isFixedValueList = m.target === 'fixed_value' && m.fixedValueId;
+
+                if (isFixedValueList) {
+                  const fv = fixedValues.find(f => f.id === m.fixedValueId);
+                  const listItems = fv?.list_values || [];
+                  return (
+                    <div key={m.parameterName}>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        {m.promptText || m.parameterName}
+                        <span className="ml-2 text-gray-400 font-normal">(list)</span>
+                      </label>
+                      <CustomDropdown
+                        value={promptDialog.values[m.parameterName] || ''}
+                        onChange={(val) => handlePromptValueChange(m.parameterName, val)}
+                        options={listItems.map(item => ({ value: item.value, label: item.label || item.value }))}
+                        placeholder="Select a value..."
+                        size="sm"
+                        searchable
+                      />
+                    </div>
+                  );
+                }
 
                 if (isLookupMapping) {
                   const lookupState = m.lookupQueryId
