@@ -284,7 +284,7 @@ export default function ConditionalFormattingTab({
 
   return (
     <div className="flex flex-1 gap-4 min-h-0">
-      <div className="w-48 flex-shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden flex flex-col">
+      <div className="w-64 flex-shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden flex flex-col">
         <div className="bg-gray-50 dark:bg-gray-800 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
           <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Target
