@@ -30,7 +30,7 @@ export default function Dropdown({ trigger, children, align = 'left', width = 'w
       </div>
       {isOpen && (
         <div
-          className={`absolute z-50 ${width} bg-white dark:bg-gray-800 rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 fade-in ${
+          className={`absolute z-50 ${width} bg-white dark:bg-gray-800 rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 overflow-hidden fade-in ${
             align === 'right' ? 'right-0' : 'left-0'
           } ${openUp ? 'bottom-full mb-2' : 'top-full mt-2'}`}
         >

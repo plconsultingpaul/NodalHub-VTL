@@ -1,19 +1,14 @@
-# 2026-07-18 Custom Dropdown Search Box Scroll Overlap Fix
+# 2026-07-18 Custom Dropdown Search/Scroll Fix
+
+## Summary
+
+Fixed the hover state on dropdown menu items (3-dot menus) being visually clipped at the top and bottom edges of the dropdown panel.
 
 ## Problem
 
-When scrolling through options in a searchable CustomDropdown, list items would scroll up and overlap/bleed into the sticky search input area, making it look unprofessional.
+The dropdown container used `rounded-lg` for rounded corners but did not set `overflow-hidden`. When hovering over the first or last menu item, its rectangular background fill extended beyond the container's border-radius, causing a visual cut-off effect.
 
-## Root Cause
+## Changes
 
-1. The sticky search container lacked a `z-index`, so list items scrolling underneath were not properly hidden behind it.
-2. The scrollable container had `py-1` (top and bottom padding), which created a gap above the sticky search box where scrolling items would peek through.
-
-## Fix
-
-- Added `z-10` to the sticky search wrapper so it always renders above scrolling list items.
-- Changed `py-1` to `pb-1` on the container when `searchable` is true, removing the top padding gap that allowed items to show above the search box.
-
-## Files Changed
-
-- `src/components/ui/CustomDropdown.tsx`
+### `src/components/ui/Dropdown.tsx`
+- Added `overflow-hidden` to the dropdown panel's className so item hover backgrounds are properly clipped to the container's rounded corners
