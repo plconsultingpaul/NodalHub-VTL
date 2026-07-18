@@ -219,7 +219,7 @@ export default function ActionsConfigModal({
         valueType: target !== 'column' ? (m.valueType || 'text') : m.valueType,
         lookupQueryId: target === 'lookup' ? (m.lookupQueryId || '') : undefined,
         fixedValueId: (target === 'lookup' || target === 'fixed_value') ? (m.fixedValueId || '') : undefined,
-        promptText: (target === 'prompt' || target === 'lookup') ? (m.promptText || '') : undefined,
+        promptText: (target === 'prompt' || target === 'lookup' || target === 'fixed_value') ? (m.promptText || '') : undefined,
       } : m
     );
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
@@ -984,14 +984,14 @@ export default function ActionsConfigModal({
                                           </>
                                         )}
                                       </div>
-                                      {isLookup && (
+                                      {(isLookup || (currentTarget === 'fixed_value' && mapping?.fixedValueId && (() => { const fv = fixedValues.find(f => f.id === mapping.fixedValueId); return fv?.is_list || fv?.value_type === 'lookup'; })())) && (
                                         <div className="ml-[calc(7rem+2.5rem)] mt-1">
                                           <input
                                             type="text"
                                             value={mapping?.promptText || ''}
                                             onChange={(e) => handleMappingPromptTextChange(index, param.name, e.target.value)}
                                             className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                            placeholder="Display label (e.g. ISO Number)"
+                                            placeholder="Display label (e.g. Select Driver)"
                                           />
                                         </div>
                                       )}
@@ -1108,14 +1108,14 @@ export default function ActionsConfigModal({
                                           </div>
                                         )}
                                       </div>
-                                      {currentTarget === 'lookup' && (
+                                      {(currentTarget === 'lookup' || (currentTarget === 'fixed_value' && mapping.fixedValueId && (() => { const fv = fixedValues.find(f => f.id === mapping.fixedValueId); return fv?.is_list || fv?.value_type === 'lookup'; })())) && (
                                         <div className="ml-[calc(7rem+2.5rem)] mt-1">
                                           <input
                                             type="text"
                                             value={mapping.promptText || ''}
                                             onChange={(e) => handleMappingPromptTextChange(index, mapping.parameterName, e.target.value)}
                                             className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                            placeholder="Display label (e.g. ISO Number)"
+                                            placeholder="Display label (e.g. Select Driver)"
                                           />
                                         </div>
                                       )}
@@ -1289,14 +1289,14 @@ export default function ActionsConfigModal({
                                           </div>
                                         )}
                                       </div>
-                                      {lTarget === 'lookup' && (
+                                      {(lTarget === 'lookup' || (lTarget === 'fixed_value' && lMapping?.fixedValueId && (() => { const fv = fixedValues.find(f => f.id === lMapping.fixedValueId); return fv?.is_list || fv?.value_type === 'lookup'; })())) && (
                                         <div className="ml-[calc(7rem+2.5rem)] mt-1">
                                           <input
                                             type="text"
                                             value={lMapping?.promptText || ''}
                                             onChange={(e) => handleMappingPromptTextChange(index, paramName, e.target.value)}
                                             className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                            placeholder="Display label (e.g. ISO Number)"
+                                            placeholder="Display label (e.g. Select Driver)"
                                           />
                                         </div>
                                       )}
