@@ -1013,6 +1013,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         if (fv) resolveLookup(fv);
       }
     });
+    const fvListMappings = promptDialog.mappings.filter(m => m.target === 'fixed_value' && m.fixedValueId);
+    fvListMappings.forEach(m => {
+      const fv = fixedValues.find(f => f.id === m.fixedValueId);
+      if (fv?.value_type === 'lookup') resolveLookup(fv);
+    });
   }, [promptDialog, fixedValues, resolveLookup, resolveLookupByQueryId]);
 
   const toggleRowRef = useRef<((rowIndex: number, rowData: RowData) => void) | null>(null);
@@ -2821,6 +2826,34 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
                 if (isFixedValueList) {
                   const fv = fixedValues.find(f => f.id === m.fixedValueId);
+                  if (fv?.value_type === 'lookup') {
+                    const lookupState = getLookupState(m.fixedValueId!);
+                    return (
+                      <div key={m.parameterName}>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          {m.promptText || m.parameterName}
+                          <span className="ml-2 text-gray-400 font-normal">(list)</span>
+                        </label>
+                        {lookupState.loading ? (
+                          <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-gray-500">
+                            <div className="w-3 h-3 border border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+                            Loading options...
+                          </div>
+                        ) : lookupState.error ? (
+                          <p className="text-xs text-red-500">{lookupState.error}</p>
+                        ) : (
+                          <CustomDropdown
+                            value={promptDialog.values[m.parameterName] || ''}
+                            onChange={(val) => handlePromptValueChange(m.parameterName, val)}
+                            options={lookupState.options.map(o => ({ value: o.value, label: o.label }))}
+                            placeholder="Select a value..."
+                            size="sm"
+                            searchable
+                          />
+                        )}
+                      </div>
+                    );
+                  }
                   const listItems = fv?.list_values || [];
                   return (
                     <div key={m.parameterName}>
@@ -2831,7 +2864,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                       <CustomDropdown
                         value={promptDialog.values[m.parameterName] || ''}
                         onChange={(val) => handlePromptValueChange(m.parameterName, val)}
-                        options={listItems.map(item => ({ value: item.value, label: item.label || item.value }))}
+                        options={listItems.map(item => ({ value: item.value, label: item.description || item.value }))}
                         placeholder="Select a value..."
                         size="sm"
                         searchable

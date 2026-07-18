@@ -160,7 +160,7 @@ function buildParamValues(
       if (m.fixedValueId && fixedValues) {
         const fv = fixedValues.find(f => f.id === m.fixedValueId);
         if (fv) {
-          if (fv.is_list && promptValues && promptValues[m.parameterName] !== undefined) {
+          if ((fv.is_list || fv.value_type === 'lookup') && promptValues && promptValues[m.parameterName] !== undefined) {
             paramValues[m.parameterName] = promptValues[m.parameterName];
           } else {
             paramValues[m.parameterName] = resolveFixedValue(fv);
@@ -460,7 +460,7 @@ export function getFixedValueListMappings(action: DashboardCellActionWithQuery, 
   return mappings.filter(m => {
     if (m.target !== 'fixed_value' || !m.fixedValueId) return false;
     const fv = fixedValues.find(f => f.id === m.fixedValueId);
-    return fv?.is_list === true;
+    return fv?.is_list === true || fv?.value_type === 'lookup';
   });
 }
 
