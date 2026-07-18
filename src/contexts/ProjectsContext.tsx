@@ -14,6 +14,8 @@ interface ProjectsContextValue {
   createDashboard: (name: string, projectId: string) => Promise<{ data?: Dashboard; error?: string }>;
   updateDashboard: (id: string, updates: Partial<Dashboard>) => Promise<{ error: string | null }>;
   deleteDashboard: (id: string) => Promise<{ error: string | null }>;
+  reorderDashboards: (orderedIds: string[]) => Promise<{ error: string | null }>;
+  reorderPulses: (orderedIds: string[]) => Promise<{ error: string | null }>;
 }
 
 const ProjectsContext = createContext<ProjectsContextValue | null>(null);
@@ -47,6 +49,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         .from('dashboards')
         .select('*')
         .eq('company_id', activeCompany.id)
+        .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true });
 
       if (dashboardsError) throw dashboardsError;
@@ -55,6 +58,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         .from('pulses')
         .select('*')
         .eq('company_id', activeCompany.id)
+        .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true });
 
       if (pulsesError) throw pulsesError;
@@ -168,6 +172,28 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  const reorderDashboards = async (orderedIds: string[]) => {
+    const updates = orderedIds.map((id, index) => 
+      supabase.from('dashboards').update({ sort_order: index }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed?.error) return { error: failed.error.message };
+    await fetchProjects();
+    return { error: null };
+  };
+
+  const reorderPulses = async (orderedIds: string[]) => {
+    const updates = orderedIds.map((id, index) => 
+      supabase.from('pulses').update({ sort_order: index }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed?.error) return { error: failed.error.message };
+    await fetchProjects();
+    return { error: null };
+  };
+
   return (
     <ProjectsContext.Provider
       value={{
@@ -180,7 +206,9 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         deleteProject,
         createDashboard,
         updateDashboard,
-        deleteDashboard
+        deleteDashboard,
+        reorderDashboards,
+        reorderPulses
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -17,7 +17,8 @@ import {
   Copy,
   Folder,
   ScrollText,
-  Database
+  Database,
+  GripVertical
 } from 'lucide-react';
 import { useSidebar } from '../../contexts/SidebarContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -42,7 +43,7 @@ const PROJECT_COLORS = [
 export default function Sidebar() {
   const { collapsed, setCollapsed, toggle } = useSidebar();
   const { activeCompany, hasPermission, isAdmin, getDashboardAccess } = useAuth();
-  const { projects, createProject, createDashboard, updateProject, deleteProject, updateDashboard, deleteDashboard, refetch: refetchProjects } = useProjects();
+  const { projects, createProject, createDashboard, updateProject, deleteProject, updateDashboard, deleteDashboard, reorderDashboards, reorderPulses, refetch: refetchProjects } = useProjects();
   const { deletePulse, updatePulse, duplicatePulse, refetch: refetchPulses } = usePulses();
   const {
     openDashboards,
@@ -72,6 +73,9 @@ export default function Sidebar() {
   const [saving, setSaving] = useState(false);
   const [draggedDashboardId, setDraggedDashboardId] = useState<string | null>(null);
   const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
+  const [sortOrderItems, setSortOrderItems] = useState<{ id: string; name: string }[]>([]);
+  const dragSortRef = useRef<number | null>(null);
+  const dragSortOverRef = useRef<number | null>(null);
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [namePromptValue, setNamePromptValue] = useState('');
   const [namePromptProjectId, setNamePromptProjectId] = useState<string | null>(null);
@@ -151,6 +155,17 @@ export default function Sidebar() {
     setSaving(true);
     if (editingItem.type === 'project') {
       await updateProject(editingItem.id, { name: editingItem.name, color: editingItem.color });
+      const project = projects.find(p => p.id === editingItem.id);
+      if (project) {
+        const dashboardIds = sortOrderItems.filter(item => 
+          (project.dashboards || []).some(d => d.id === item.id)
+        ).map(item => item.id);
+        const pulseIds = sortOrderItems.filter(item => 
+          (project.pulses || []).some(p => p.id === item.id)
+        ).map(item => item.id);
+        if (dashboardIds.length > 0) await reorderDashboards(dashboardIds);
+        if (pulseIds.length > 0) await reorderPulses(pulseIds);
+      }
     } else if (editingItem.type === 'pulse') {
       await updatePulse(editingItem.id, { name: editingItem.name });
       await refetchProjects();
@@ -234,6 +249,16 @@ export default function Sidebar() {
   const openEditModal = (type: 'project' | 'dashboard' | 'pulse', id: string, name: string, color?: string, projectId?: string) => {
     setEditingItem({ type, id, name, color, projectId });
     setShowEditModal(true);
+    if (type === 'project') {
+      const project = projects.find(p => p.id === id);
+      if (project) {
+        const dashboardItems = (project.dashboards || []).map(d => ({ id: d.id, name: d.name }));
+        const pulseItems = (project.pulses || []).map(p => ({ id: p.id, name: p.name }));
+        setSortOrderItems([...dashboardItems, ...pulseItems]);
+      }
+    } else {
+      setSortOrderItems([]);
+    }
   };
 
   const isHomeActive = location.pathname === '/' && !activeDashboardId && !isBuilderOpen && !isPulseBuilderOpen;
@@ -832,6 +857,35 @@ export default function Sidebar() {
                       }`}
                       style={{ backgroundColor: color }}
                     />
+                  ))}
+                </div>
+              </div>
+            )}
+            {editingItem.type === 'project' && sortOrderItems.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Item Order</label>
+                <div className="border border-slate-200 dark:border-slate-600 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                  {sortOrderItems.map((item, index) => (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={() => { dragSortRef.current = index; }}
+                      onDragEnter={() => { dragSortOverRef.current = index; }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDragEnd={() => {
+                        if (dragSortRef.current === null || dragSortOverRef.current === null) return;
+                        const reordered = [...sortOrderItems];
+                        const [removed] = reordered.splice(dragSortRef.current, 1);
+                        reordered.splice(dragSortOverRef.current, 0, removed);
+                        setSortOrderItems(reordered);
+                        dragSortRef.current = null;
+                        dragSortOverRef.current = null;
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white dark:bg-slate-700 border-b border-slate-100 dark:border-slate-600 last:border-b-0 cursor-grab active:cursor-grabbing hover:bg-slate-50 dark:hover:bg-slate-600"
+                    >
+                      <GripVertical className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="text-slate-700 dark:text-slate-200 truncate">{item.name}</span>
+                    </div>
                   ))}
                 </div>
               </div>

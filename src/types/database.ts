@@ -153,6 +153,7 @@ export interface Database {
           created_at: string;
           updated_at: string;
           auto_refresh_minutes: number | null;
+          sort_order: number;
         };
         Insert: {
           id?: string;
@@ -163,6 +164,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           auto_refresh_minutes?: number | null;
+          sort_order?: number;
         };
         Update: {
           id?: string;
@@ -173,6 +175,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           auto_refresh_minutes?: number | null;
+          sort_order?: number;
         };
       };
       api_endpoints: {
@@ -705,6 +708,7 @@ export interface Database {
           workflow_version: number;
           trigger_type: 'scheduled' | 'action';
           input_variables: PulseInputVariable[];
+          sort_order: number;
         };
         Insert: {
           id?: string;
@@ -727,6 +731,7 @@ export interface Database {
           workflow_version?: number;
           trigger_type?: 'scheduled' | 'action';
           input_variables?: PulseInputVariable[];
+          sort_order?: number;
         };
         Update: {
           id?: string;
@@ -749,6 +754,7 @@ export interface Database {
           workflow_version?: number;
           trigger_type?: 'scheduled' | 'action';
           input_variables?: PulseInputVariable[];
+          sort_order?: number;
         };
       };
       pulse_schedules: {
