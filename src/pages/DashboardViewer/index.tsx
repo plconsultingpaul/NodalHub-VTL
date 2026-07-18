@@ -18,7 +18,7 @@ import GridFormattingModal, { DrilldownDefinition } from './GridFormattingModal'
 import EmailCsvModal from './EmailCsvModal';
 import PopupActionModal from './PopupActionModal';
 import DashboardAccessModal from './DashboardAccessModal';
-import { executeLinkAction, getPromptMappings } from './actionExecutor';
+import { executeLinkAction, getPromptMappings, actionRequiresRowData } from './actionExecutor';
 import { useCellActions } from '../../hooks/useCellActions';
 import { logActivity } from '../../lib/activityLog';
 import type { UserParameter, FixedValue, FixedValueListItem, GridTemplate, GridTemplateColumnConfig, GridFormattingRules, GridTemplateCellColumnConfig, GridCellFormattingRules, DashboardCellActionWithQuery, ActionVisibilityCondition } from '../../types/database';

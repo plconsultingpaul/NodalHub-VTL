@@ -462,6 +462,11 @@ export async function executeActionForRows(
   return { success, failed, pulseTriggered, errors };
 }
 
+export function actionRequiresRowData(action: DashboardCellActionWithQuery): boolean {
+  const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
+  return mappings.some(m => m.target === 'column');
+}
+
 export function getPromptMappings(action: DashboardCellActionWithQuery): ActionParameterMapping[] {
   const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
   return mappings.filter(m => m.target === 'prompt' || m.target === 'lookup');

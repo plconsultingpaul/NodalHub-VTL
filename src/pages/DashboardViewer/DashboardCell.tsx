@@ -8,7 +8,7 @@ import DatePicker from '../../components/ui/DatePicker';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
-import { executeActionForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction } from './actionExecutor';
+import { executeActionForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction, actionRequiresRowData } from './actionExecutor';
 import type { ActionProgressCallback } from './actionExecutor';
 import type {
   DashboardCellWithRelations,
@@ -1757,7 +1757,10 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     }
 
     if (rows.length === 0) {
-      return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
+      if (actionRequiresRowData(action)) {
+        return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
+      }
+      rows = [{}];
     }
 
     const prompts = getPromptMappings(action);
