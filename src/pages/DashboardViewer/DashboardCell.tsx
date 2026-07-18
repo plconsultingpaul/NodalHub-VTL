@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import CustomDropdown from '../../components/ui/CustomDropdown';
 import DatePicker from '../../components/ui/DatePicker';
+import { useAuth } from '../../contexts/AuthContext';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { executeActionForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction } from './actionExecutor';
@@ -952,6 +953,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   const [cellActions, setCellActions] = useState<DashboardCellActionWithQuery[]>([]);
   const { resolveLookup, resolveLookupByQueryId, getLookupState, getLookupStateByQueryId } = useLookupResolver();
   const { fixedValues } = useFixedValues();
+  const { profile } = useAuth();
   const [promptDialog, setPromptDialog] = useState<{
     action: DashboardCellActionWithQuery;
     mappings: ActionParameterMapping[];
@@ -1774,7 +1776,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
-    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues);
+    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues, profile);
 
     if (action.refresh_after_execute) {
       fetchData();
@@ -2324,7 +2326,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             promptResolveRef.current = () => {};
             return;
           }
-          executeLinkAction(action, rd, undefined, fixedValues);
+          executeLinkAction(action, rd, undefined, fixedValues, profile);
           return;
         }
 
@@ -2361,7 +2363,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
         const result = await executeActionForRows(action, rows, (current, total) => {
           setCellProcessing({ name: action.display_name, current, total });
-        }, undefined, fixedValues);
+        }, undefined, fixedValues, profile);
         setCellProcessing(null);
 
         if (action.refresh_after_execute) {
@@ -2662,7 +2664,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     setPromptDialog(null);
 
     if (action.action_type === 'link') {
-      executeLinkAction(action, rows[0], values, fixedValues);
+      executeLinkAction(action, rows[0], values, fixedValues, profile);
       if (promptResolveRef.current) {
         promptResolveRef.current({ success: 1, failed: 0, pulseTriggered: 0, errors: [] });
         promptResolveRef.current = null;
@@ -2678,7 +2680,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
     }
 
-    const result = await executeActionForRows(action, rows, progressCallback, values, fixedValues);
+    const result = await executeActionForRows(action, rows, progressCallback, values, fixedValues, profile);
 
     if (!onProgress) {
       setCellProcessing(null);

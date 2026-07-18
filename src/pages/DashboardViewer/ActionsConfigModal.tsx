@@ -208,7 +208,7 @@ export default function ActionsConfigModal({
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
   };
 
-  const handleMappingTargetChange = (actionIndex: number, paramName: string, target: 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value') => {
+  const handleMappingTargetChange = (actionIndex: number, paramName: string, target: 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user') => {
     const action = actions[actionIndex];
     const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
       m.parameterName === paramName ? {
@@ -220,6 +220,7 @@ export default function ActionsConfigModal({
         lookupQueryId: target === 'lookup' ? (m.lookupQueryId || '') : undefined,
         fixedValueId: (target === 'lookup' || target === 'fixed_value') ? (m.fixedValueId || '') : undefined,
         promptText: (target === 'prompt' || target === 'lookup' || target === 'fixed_value') ? (m.promptText || '') : undefined,
+        userField: target === 'user' ? (m.userField || 'username') : undefined,
       } : m
     );
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
@@ -261,6 +262,14 @@ export default function ActionsConfigModal({
     const action = actions[actionIndex];
     const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
       m.parameterName === paramName ? { ...m, fixedValueId } : m
+    );
+    handleUpdateAction(actionIndex, { parameter_mappings: updated });
+  };
+
+  const handleMappingUserFieldChange = (actionIndex: number, paramName: string, userField: 'username' | 'full_name') => {
+    const action = actions[actionIndex];
+    const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
+      m.parameterName === paramName ? { ...m, userField } : m
     );
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
   };
@@ -865,13 +874,14 @@ export default function ActionsConfigModal({
                                         <div className="w-32 shrink-0">
                                           <CustomDropdown
                                             value={currentTarget}
-                                            onChange={(val) => handleMappingTargetChange(index, param.name, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value')}
+                                            onChange={(val) => handleMappingTargetChange(index, param.name, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user')}
                                             options={[
                                               { value: 'column', label: 'Column' },
                                               { value: 'hardcode', label: 'Hardcode' },
                                               { value: 'prompt', label: 'Prompt' },
                                               { value: 'lookup', label: 'Lookup' },
                                               { value: 'fixed_value', label: 'Fixed Value' },
+                                              { value: 'user', label: 'User' },
                                             ]}
                                             size="sm"
                                           />
@@ -981,6 +991,20 @@ export default function ActionsConfigModal({
                                                 />
                                               </div>
                                             )}
+                                            {currentTarget === 'user' && (
+                                              <div className="flex-1">
+                                                <CustomDropdown
+                                                  value={mapping?.userField || 'username'}
+                                                  onChange={(val) => handleMappingUserFieldChange(index, param.name, val as 'username' | 'full_name')}
+                                                  options={[
+                                                    { value: 'username', label: 'Username' },
+                                                    { value: 'full_name', label: 'Name' },
+                                                  ]}
+                                                  placeholder="Select user field..."
+                                                  size="sm"
+                                                />
+                                              </div>
+                                            )}
                                           </>
                                         )}
                                       </div>
@@ -1029,13 +1053,14 @@ export default function ActionsConfigModal({
                                         <div className="w-32 shrink-0">
                                           <CustomDropdown
                                             value={currentTarget}
-                                            onChange={(val) => handleMappingTargetChange(index, mapping.parameterName, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value')}
+                                            onChange={(val) => handleMappingTargetChange(index, mapping.parameterName, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user')}
                                             options={[
                                               { value: 'column', label: 'Column' },
                                               { value: 'hardcode', label: 'Hardcode' },
                                               { value: 'prompt', label: 'Prompt' },
                                               { value: 'lookup', label: 'Lookup' },
                                               { value: 'fixed_value', label: 'Fixed Value' },
+                                              { value: 'user', label: 'User' },
                                             ]}
                                             size="sm"
                                           />
@@ -1104,6 +1129,20 @@ export default function ActionsConfigModal({
                                               placeholder="Select fixed value..."
                                               size="sm"
                                               searchable
+                                            />
+                                          </div>
+                                        )}
+                                        {currentTarget === 'user' && (
+                                          <div className="flex-1">
+                                            <CustomDropdown
+                                              value={mapping.userField || 'username'}
+                                              onChange={(val) => handleMappingUserFieldChange(index, mapping.parameterName, val as 'username' | 'full_name')}
+                                              options={[
+                                                { value: 'username', label: 'Username' },
+                                                { value: 'full_name', label: 'Name' },
+                                              ]}
+                                              placeholder="Select user field..."
+                                              size="sm"
                                             />
                                           </div>
                                         )}
@@ -1210,13 +1249,14 @@ export default function ActionsConfigModal({
                                         <div className="w-32 shrink-0">
                                           <CustomDropdown
                                             value={lTarget}
-                                            onChange={(val) => handleMappingTargetChange(index, paramName, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value')}
+                                            onChange={(val) => handleMappingTargetChange(index, paramName, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user')}
                                             options={[
                                               { value: 'column', label: 'Cell from Grid' },
                                               { value: 'hardcode', label: 'Hardcode' },
                                               { value: 'prompt', label: 'User Entry' },
                                               { value: 'lookup', label: 'Lookup' },
                                               { value: 'fixed_value', label: 'Fixed Value' },
+                                              { value: 'user', label: 'User' },
                                             ]}
                                             size="sm"
                                           />
@@ -1285,6 +1325,20 @@ export default function ActionsConfigModal({
                                               placeholder="Select fixed value..."
                                               size="sm"
                                               searchable
+                                            />
+                                          </div>
+                                        )}
+                                        {lTarget === 'user' && (
+                                          <div className="flex-1">
+                                            <CustomDropdown
+                                              value={lMapping?.userField || 'username'}
+                                              onChange={(val) => handleMappingUserFieldChange(index, paramName, val as 'username' | 'full_name')}
+                                              options={[
+                                                { value: 'username', label: 'Username' },
+                                                { value: 'full_name', label: 'Name' },
+                                              ]}
+                                              placeholder="Select user field..."
+                                              size="sm"
                                             />
                                           </div>
                                         )}

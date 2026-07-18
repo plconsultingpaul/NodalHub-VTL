@@ -1160,7 +1160,7 @@ export type ActionMappingValueType = 'text' | 'date' | 'integer' | 'double' | 'b
 
 export interface ActionParameterMapping {
   parameterName: string;
-  target: 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value';
+  target: 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user';
   columnName: string;
   hardcodeValue?: string;
   valueType?: ActionMappingValueType;
@@ -1168,6 +1168,7 @@ export interface ActionParameterMapping {
   fixedValueId?: string;
   lookupQueryId?: string;
   isPathVariable?: boolean;
+  userField?: 'username' | 'full_name';
 }
 
 export type ActionType = 'execute' | 'popup' | 'link';

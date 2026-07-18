@@ -12,6 +12,7 @@ import type {
   FixedValueDateConfig,
   FixedValueListItem,
   DateFunctionBaseDate,
+  Profile,
 } from '../../types/database';
 
 const MULTI_ROW_DELAY_MS = 100;
@@ -145,7 +146,8 @@ function buildParamValues(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
   promptValues?: Record<string, string>,
-  fixedValues?: FixedValue[]
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
 ): Record<string, string> {
   const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
   const paramValues: Record<string, string> = {};
@@ -166,6 +168,10 @@ function buildParamValues(
             paramValues[m.parameterName] = resolveFixedValue(fv);
           }
         }
+      }
+    } else if (m.target === 'user') {
+      if (userProfile) {
+        paramValues[m.parameterName] = (m.userField === 'full_name' ? userProfile.full_name : userProfile.username) || '';
       }
     } else {
       if (m.columnName && rowData[m.columnName] !== undefined) {
@@ -200,12 +206,13 @@ export async function executeActionForRow(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
   promptValues?: Record<string, string>,
-  fixedValues?: FixedValue[]
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
 ): Promise<{ ok: boolean; error?: string }> {
   const query = action.queries;
   if (!query || !query.api_endpoint_id) return { ok: false, error: 'No query or endpoint configured' };
 
-  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues);
+  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues, userProfile);
 
   try {
     const ep = await fetchEndpoint(query.api_endpoint_id);
@@ -233,6 +240,10 @@ export async function executeActionForRow(
           if (m.fixedValueId && fixedValues) {
             const fv = fixedValues.find(f => f.id === m.fixedValueId);
             if (fv) value = resolveFixedValue(fv);
+          }
+        } else if (m.target === 'user') {
+          if (userProfile) {
+            value = (m.userField === 'full_name' ? userProfile.full_name : userProfile.username) || '';
           }
         }
         if (value) {
@@ -411,7 +422,8 @@ export async function executeActionForRows(
   rows: Record<string, unknown>[],
   onProgress?: ActionProgressCallback,
   promptValues?: Record<string, string>,
-  fixedValues?: FixedValue[]
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
 ): Promise<ActionExecutionResult> {
   if (rows.length === 0) {
     return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
@@ -424,7 +436,7 @@ export async function executeActionForRows(
 
   for (let i = 0; i < rows.length; i++) {
     onProgress?.(i + 1, rows.length);
-    const result = await executeActionForRow(action, rows[i], promptValues, fixedValues);
+    const result = await executeActionForRow(action, rows[i], promptValues, fixedValues, userProfile);
     if (result.ok) {
       success++;
       if (action.post_action_pulse_id) {
@@ -468,12 +480,13 @@ export function executeLinkAction(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
   promptValues?: Record<string, string>,
-  fixedValues?: FixedValue[]
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
 ): void {
   const urlTemplate = action.link_url_template || '';
   if (!urlTemplate) return;
 
-  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues);
+  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues, userProfile);
 
   let url = urlTemplate;
   Object.entries(paramValues).forEach(([name, value]) => {
