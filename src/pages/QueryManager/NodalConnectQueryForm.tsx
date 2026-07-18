@@ -179,7 +179,10 @@ export default function NodalConnectQueryForm({
       if (i !== index) return p;
       if (field === 'name') {
         const paramName = value.startsWith('@') ? value : `@${value}`;
-        return { ...p, name: paramName, prompt: value.replace(/^@/, '') };
+        const stripped = value.replace(/^@/, '');
+        const autoPrompt = p.name.replace(/^@/, '');
+        const newPrompt = (!p.prompt || p.prompt === autoPrompt) ? stripped : p.prompt;
+        return { ...p, name: paramName, prompt: newPrompt };
       }
       if (field === 'dataType') {
         const matchedFv = fixedValues.find(fv => fv.id === value);
@@ -564,40 +567,51 @@ export default function NodalConnectQueryForm({
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {userParameters.map((param, idx) => (
-              <div key={idx} className="px-4 py-3 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
+              <div key={idx} className="px-4 py-3 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={param.name}
+                      onChange={(e) => handleParamChange(idx, 'name', e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:bg-gray-700 dark:text-white"
+                      placeholder="@paramName"
+                    />
+                  </div>
+                  <div className="w-36">
+                    <CustomDropdown
+                      value={param.dataType}
+                      onChange={(val) => handleParamChange(idx, 'dataType', val)}
+                      options={[
+                        { value: 'Text', label: 'Text' },
+                        { value: 'Integer', label: 'Integer' },
+                        { value: 'Double', label: 'Double' },
+                        { value: 'Boolean', label: 'Boolean' },
+                        { value: 'Date', label: 'Date' },
+                        ...fixedValues.map(fv => ({
+                          value: fv.id,
+                          label: `Fixed: ${fv.name}`
+                        }))
+                      ]}
+                      size="sm"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleRemoveParameter(idx)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="pl-0">
                   <input
                     type="text"
-                    value={param.name}
-                    onChange={(e) => handleParamChange(idx, 'name', e.target.value)}
-                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:bg-gray-700 dark:text-white"
-                    placeholder="@paramName"
+                    value={param.prompt}
+                    onChange={(e) => handleParamChange(idx, 'prompt', e.target.value)}
+                    className="w-full px-2 py-1.5 border border-gray-200 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:bg-gray-700 dark:text-white text-gray-700 dark:text-gray-300"
+                    placeholder="Prompt text shown to user (e.g. Enter the Vendor ID)"
                   />
                 </div>
-                <div className="w-36">
-                  <CustomDropdown
-                    value={param.dataType}
-                    onChange={(val) => handleParamChange(idx, 'dataType', val)}
-                    options={[
-                      { value: 'Text', label: 'Text' },
-                      { value: 'Integer', label: 'Integer' },
-                      { value: 'Double', label: 'Double' },
-                      { value: 'Boolean', label: 'Boolean' },
-                      { value: 'Date', label: 'Date' },
-                      ...fixedValues.map(fv => ({
-                        value: fv.id,
-                        label: `Fixed: ${fv.name}`
-                      }))
-                    ]}
-                    size="sm"
-                  />
-                </div>
-                <button
-                  onClick={() => handleRemoveParameter(idx)}
-                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
               </div>
             ))}
           </div>
