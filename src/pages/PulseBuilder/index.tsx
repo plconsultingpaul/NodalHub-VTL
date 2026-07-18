@@ -55,7 +55,7 @@ const emptyEmailDraft = (): Partial<PulseEmail> => ({
 });
 
 export default function PulseBuilder() {
-  const { pulseBuilderProjectId, pulseBuilderPulseId, closePulseBuilder } = useActiveDashboards();
+  const { pulseBuilderProjectId, pulseBuilderPulseId, closePulseBuilder, openPulseBuilder } = useActiveDashboards();
   const { activeCompany, user } = useAuth();
   const { createPulse, updatePulse } = usePulses();
   const { refetch: refetchProjects } = useProjects();
@@ -422,8 +422,8 @@ export default function PulseBuilder() {
       await refetchProjects();
       await refetchPulseConfig();
 
-      if (!pulseBuilderPulseId && pulseId) {
-        closePulseBuilder();
+      if (!pulseBuilderPulseId && pulseId && pulseBuilderProjectId) {
+        openPulseBuilder(pulseBuilderProjectId, pulseId);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save pulse');
