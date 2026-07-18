@@ -302,7 +302,7 @@ export default function GridFormattingModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Grid Formatting" size="3xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Grid Formatting" size="4xl">
       <div className="flex flex-col h-[700px]">
         <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
           <button

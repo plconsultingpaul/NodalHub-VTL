@@ -499,7 +499,7 @@ export default function ConditionalFormattingTab({
                               autoWidth
                             />
                           </td>
-                          <td className="px-1 py-1">
+                          <td className="px-1 py-1 min-w-[140px]">
                             <CustomDropdown
                               value={condition.dataType}
                               onChange={(val) => updateCondition(condition.id, {
@@ -509,14 +509,16 @@ export default function ConditionalFormattingTab({
                               })}
                               options={DATA_TYPES.map(dt => ({ value: dt, label: dt }))}
                               size="sm"
+                              autoWidth
                             />
                           </td>
-                          <td className="px-1 py-1">
+                          <td className="px-1 py-1 min-w-[180px]">
                             <CustomDropdown
                               value={condition.comparison}
                               onChange={(val) => updateCondition(condition.id, { comparison: val as ConditionalComparison })}
                               options={COMPARISONS.map(c => ({ value: c, label: c }))}
                               size="sm"
+                              autoWidth
                             />
                           </td>
                           <td className="px-1 py-1">
