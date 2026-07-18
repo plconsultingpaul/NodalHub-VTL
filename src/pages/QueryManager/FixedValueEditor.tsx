@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, ArrowUp, ArrowDown, X, Upload, Download } from 'lucide-react';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { useQueries } from '../../hooks/useQueries';
 import Button from '../../components/ui/Button';
@@ -141,6 +141,7 @@ export default function FixedValueEditor({ fixedValue, valueType, onClose }: Fix
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isEditing) {
@@ -202,6 +203,76 @@ export default function FixedValueEditor({ fixedValue, valueType, onClose }: Fix
   const handleDeleteAll = () => {
     setListValues([]);
     setDefaultValue('');
+  };
+
+  const parseCsvLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          current += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ',') {
+          result.push(current);
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+    }
+    result.push(current);
+    return result;
+  };
+
+  const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      const imported: FixedValueListItem[] = [];
+      for (const line of lines) {
+        const cols = parseCsvLine(line);
+        const value = cols[0]?.trim();
+        if (!value) continue;
+        imported.push({ value, description: cols[1]?.trim() || '' });
+      }
+      if (imported.length > 0) {
+        setListValues(prev => [...prev, ...imported]);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExportCsv = () => {
+    const escapeCsvField = (field: string) => {
+      if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+        return '"' + field.replace(/"/g, '""') + '"';
+      }
+      return field;
+    };
+    const rows = listValues.map(item => `${escapeCsvField(item.value)},${escapeCsvField(item.description)}`);
+    const csv = 'Value,Description\n' + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.trim() || 'fixed-values'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSave = async () => {
@@ -513,6 +584,22 @@ export default function FixedValueEditor({ fixedValue, valueType, onClose }: Fix
               <Button size="sm" variant="secondary" onClick={handleSortDescending} disabled={listValues.length < 2}>
                 Descending
               </Button>
+              <div className="h-4 w-px bg-gray-300 dark:bg-gray-600" />
+              <Button size="sm" variant="secondary" onClick={() => csvInputRef.current?.click()}>
+                <Upload className="w-3.5 h-3.5" />
+                Import CSV
+              </Button>
+              <Button size="sm" variant="secondary" onClick={handleExportCsv} disabled={listValues.length === 0}>
+                <Download className="w-3.5 h-3.5" />
+                Export CSV
+              </Button>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleImportCsv}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-2">
