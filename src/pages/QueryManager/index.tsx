@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
 import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus } from 'lucide-react';
 import { useQueries } from '../../hooks/useQueries';
@@ -6,6 +7,7 @@ import { useEndpoints } from '../../hooks/useEndpoints';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectsContext';
 import { useFixedValues } from '../../hooks/useFixedValues';
+import { useActiveDashboards } from '../../contexts/ActiveDashboardsContext';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
@@ -88,6 +90,9 @@ export default function QueryManager() {
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState('#3B82F6');
   const [dashboardCreatedId, setDashboardCreatedId] = useState<string | null>(null);
+  const [dashboardCreatedData, setDashboardCreatedData] = useState<any>(null);
+  const navigate = useNavigate();
+  const { openDashboard } = useActiveDashboards();
 
   const filteredQueries = useMemo(() => {
     if (purposeTypeFilter === 'all') return queries;
@@ -117,6 +122,7 @@ export default function QueryManager() {
     setCreateDashboardName('');
     setCreateDashboardFolderId('');
     setCreateDashboardError('');
+    setDashboardCreatedData(null);
     setShowNewFolderInline(false);
     setDashboardCreatedId(null);
   };
@@ -196,6 +202,7 @@ export default function QueryManager() {
 
     setCreatingDashboard(false);
     setDashboardCreatedId(newDashboardId);
+    setDashboardCreatedData(dashResult.data!);
   };
 
   const handleCreate = (type: QueryType) => {
@@ -1428,7 +1435,10 @@ export default function QueryManager() {
               </Button>
               <Button onClick={() => {
                 handleCloseCreateDashboard();
-                window.location.href = `/dashboard/${dashboardCreatedId}`;
+                if (dashboardCreatedData) {
+                  openDashboard(dashboardCreatedData, true);
+                  navigate('/');
+                }
               }}>
                 <LayoutDashboard className="w-4 h-4" />
                 Open Dashboard
