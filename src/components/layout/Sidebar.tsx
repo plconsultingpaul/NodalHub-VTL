@@ -344,7 +344,7 @@ export default function Sidebar() {
               </div>
 
               {isExpanded && type === 'dashboards' && (
-                <div className="ml-5 mt-0.5 space-y-0.5">
+                <div className="ml-5 mt-0.5 space-y-0">
                   {project.dashboards.filter(d => isAdmin || getDashboardAccess(d.id) !== 'none').map((dashboard) => {
                     const isActive = activeDashboardId === dashboard.id;
                     const isDragging = draggedDashboardId === dashboard.id;
@@ -359,7 +359,7 @@ export default function Sidebar() {
                       >
                         <button
                           onClick={() => handleDashboardPlay(dashboard)}
-                          className={`flex items-center gap-2 flex-1 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
+                          className={`flex items-center gap-2 flex-1 px-3 py-0.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
                             isActive
                               ? (isLight ? 'sidebar-active-glow-light text-blue-700' : 'sidebar-active-glow text-white')
                               : (isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-300 hover:text-white')
@@ -411,14 +411,14 @@ export default function Sidebar() {
               )}
 
               {isExpanded && type === 'pulse' && (
-                <div className="ml-5 mt-0.5 space-y-0.5">
+                <div className="ml-5 mt-0.5 space-y-0">
                   {project.pulses.map((pulse) => {
                     const isActive = isPulseBuilderOpen && pulseBuilderPulseId === pulse.id;
                     return (
                       <div key={pulse.id} className="flex items-center group">
                         <button
                           onClick={() => handlePulseEdit(pulse)}
-                          className={`flex items-center gap-2 flex-1 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
+                          className={`flex items-center gap-2 flex-1 px-3 py-0.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
                             isActive
                               ? (isLight ? 'sidebar-active-glow-light text-blue-700' : 'sidebar-active-glow text-white')
                               : (isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-300 hover:text-white')
