@@ -43,7 +43,7 @@ const PROJECT_COLORS = [
 export default function Sidebar() {
   const { collapsed, setCollapsed, toggle } = useSidebar();
   const { activeCompany, hasPermission, isAdmin, getDashboardAccess } = useAuth();
-  const { projects, createProject, createDashboard, updateProject, deleteProject, updateDashboard, deleteDashboard, reorderDashboards, reorderPulses, refetch: refetchProjects } = useProjects();
+  const { projects, createProject, createDashboard, updateProject, deleteProject, updateDashboard, deleteDashboard, reorderDashboards, reorderPulses, reorderProjects, refetch: refetchProjects } = useProjects();
   const { deletePulse, updatePulse, duplicatePulse, refetch: refetchPulses } = usePulses();
   const {
     openDashboards,
@@ -76,6 +76,11 @@ export default function Sidebar() {
   const [sortOrderItems, setSortOrderItems] = useState<{ id: string; name: string }[]>([]);
   const dragSortRef = useRef<number | null>(null);
   const dragSortOverRef = useRef<number | null>(null);
+  const [showReorderFoldersModal, setShowReorderFoldersModal] = useState(false);
+  const [reorderFolderType, setReorderFolderType] = useState<'dashboards' | 'pulse'>('dashboards');
+  const [folderOrder, setFolderOrder] = useState<{ id: string; name: string; color: string }[]>([]);
+  const dragFolderRef = useRef<number | null>(null);
+  const dragFolderOverRef = useRef<number | null>(null);
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [namePromptValue, setNamePromptValue] = useState('');
   const [namePromptProjectId, setNamePromptProjectId] = useState<string | null>(null);
@@ -120,6 +125,20 @@ export default function Sidebar() {
       setNewProjectName('');
       setNewProjectColor('#3B82F6');
     }
+  };
+
+  const openReorderFoldersModal = (type: 'dashboards' | 'pulse') => {
+    setReorderFolderType(type);
+    const folders = projects.filter(p => p.type === type).map(p => ({ id: p.id, name: p.name, color: p.color }));
+    setFolderOrder(folders);
+    setShowReorderFoldersModal(true);
+  };
+
+  const handleSaveReorderFolders = async () => {
+    setSaving(true);
+    await reorderProjects(folderOrder.map(f => f.id));
+    setSaving(false);
+    setShowReorderFoldersModal(false);
   };
 
   const openNewProjectModal = (type: ProjectType) => {
@@ -556,6 +575,13 @@ export default function Sidebar() {
                       <ChevronsUpDown className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      onClick={() => openReorderFoldersModal('dashboards')}
+                      className={`p-0.5 rounded transition-colors ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-slate-500 hover:text-white'}`}
+                      title="Reorder Folders"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       onClick={() => openNewProjectModal('dashboards')}
                       className={`p-0.5 rounded transition-colors ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-slate-500 hover:text-white'}`}
                       title="New Folder"
@@ -582,6 +608,13 @@ export default function Sidebar() {
                       title={pulseProjects.every(p => expandedProjects.has(p.id)) ? 'Collapse All' : 'Expand All'}
                     >
                       <ChevronsUpDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => openReorderFoldersModal('pulse')}
+                      className={`p-0.5 rounded transition-colors ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-slate-500 hover:text-white'}`}
+                      title="Reorder Folders"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => openNewProjectModal('pulse')}
@@ -821,6 +854,49 @@ export default function Sidebar() {
             </Button>
             <Button onClick={handleCreateDashboard} loading={saving} disabled={!newDashboardName.trim() || !selectedProjectId}>
               Create Dashboard
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reorder Folders Modal */}
+      <Modal
+        isOpen={showReorderFoldersModal}
+        onClose={() => setShowReorderFoldersModal(false)}
+        title={`Reorder ${reorderFolderType === 'dashboards' ? 'Dashboard' : 'Pulse'} Folders`}
+      >
+        <div className="space-y-4">
+          <div className="border border-slate-200 dark:border-slate-600 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+            {folderOrder.map((folder, index) => (
+              <div
+                key={folder.id}
+                draggable
+                onDragStart={() => { dragFolderRef.current = index; }}
+                onDragEnter={() => { dragFolderOverRef.current = index; }}
+                onDragOver={(e) => e.preventDefault()}
+                onDragEnd={() => {
+                  if (dragFolderRef.current === null || dragFolderOverRef.current === null) return;
+                  const reordered = [...folderOrder];
+                  const [removed] = reordered.splice(dragFolderRef.current, 1);
+                  reordered.splice(dragFolderOverRef.current, 0, removed);
+                  setFolderOrder(reordered);
+                  dragFolderRef.current = null;
+                  dragFolderOverRef.current = null;
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-white dark:bg-slate-700 border-b border-slate-100 dark:border-slate-600 last:border-b-0 cursor-grab active:cursor-grabbing hover:bg-slate-50 dark:hover:bg-slate-600"
+              >
+                <GripVertical className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: folder.color }} />
+                <span className="text-slate-700 dark:text-slate-200 truncate">{folder.name}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setShowReorderFoldersModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveReorderFolders} loading={saving}>
+              Save
             </Button>
           </div>
         </div>

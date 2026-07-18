@@ -16,6 +16,7 @@ interface ProjectsContextValue {
   deleteDashboard: (id: string) => Promise<{ error: string | null }>;
   reorderDashboards: (orderedIds: string[]) => Promise<{ error: string | null }>;
   reorderPulses: (orderedIds: string[]) => Promise<{ error: string | null }>;
+  reorderProjects: (orderedIds: string[]) => Promise<{ error: string | null }>;
 }
 
 const ProjectsContext = createContext<ProjectsContextValue | null>(null);
@@ -194,6 +195,17 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  const reorderProjects = async (orderedIds: string[]) => {
+    const updates = orderedIds.map((id, index) => 
+      supabase.from('projects').update({ sort_order: index }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed?.error) return { error: failed.error.message };
+    await fetchProjects();
+    return { error: null };
+  };
+
   return (
     <ProjectsContext.Provider
       value={{
@@ -208,7 +220,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         updateDashboard,
         deleteDashboard,
         reorderDashboards,
-        reorderPulses
+        reorderPulses,
+        reorderProjects
       }}
     >
       {children}
