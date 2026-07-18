@@ -185,10 +185,10 @@ export default function CustomDropdown({
           <div
             ref={listRef}
             style={listStyle}
-            className={`rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] py-1 origin-top overflow-y-auto overflow-x-auto ${dark ? listDark : listLight} ${dark ? scrollbarDark : scrollbarLight}`}
+            className={`rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] ${searchable ? 'pb-1' : 'py-1'} origin-top overflow-y-auto overflow-x-auto ${dark ? listDark : listLight} ${dark ? scrollbarDark : scrollbarLight}`}
           >
             {searchable && (
-              <div className={`sticky top-0 p-1.5 ${dark ? 'bg-slate-800 border-b border-slate-700' : 'bg-white border-b border-slate-100'}`}>
+              <div className={`sticky top-0 z-10 p-1.5 ${dark ? 'bg-slate-800 border-b border-slate-700' : 'bg-white border-b border-slate-100'}`}>
                 <div className="relative">
                   <Search className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${dark ? 'text-slate-500' : 'text-slate-400'}`} />
                   <input
