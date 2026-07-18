@@ -6,7 +6,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
   hideCloseButton?: boolean;
 }
 
@@ -37,7 +37,9 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', h
     lg: 'max-w-2xl',
     xl: 'max-w-4xl',
     '2xl': 'max-w-6xl',
-    '3xl': 'max-w-7xl'
+    '3xl': 'max-w-7xl',
+    '4xl': 'max-w-[90rem]',
+    '5xl': 'max-w-[96rem]'
   };
 
   return (

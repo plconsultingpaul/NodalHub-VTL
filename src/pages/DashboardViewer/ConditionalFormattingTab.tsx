@@ -470,7 +470,7 @@ export default function ConditionalFormattingTab({
                   <Plus className="w-3 h-3" /> Add Condition
                 </button>
               </div>
-              <div className="border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
+              <div className="border border-gray-200 dark:border-gray-700 rounded overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
@@ -490,12 +490,13 @@ export default function ConditionalFormattingTab({
 
                       return (
                         <tr key={condition.id} className="border-t border-gray-100 dark:border-gray-700">
-                          <td className="px-1 py-1">
+                          <td className="px-1 py-1 min-w-[180px]">
                             <CustomDropdown
                               value={condition.column}
                               onChange={(val) => updateCondition(condition.id, { column: val })}
                               options={columns.map(col => ({ value: col, label: formatColumnName(col) }))}
                               size="sm"
+                              autoWidth
                             />
                           </td>
                           <td className="px-1 py-1">
