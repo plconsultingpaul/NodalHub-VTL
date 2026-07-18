@@ -377,13 +377,6 @@ export default function Sidebar() {
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    onClick={() => openEditModal('project', project.id, project.name, project.color)}
-                    className={`p-1.5 rounded transition-colors ${isLight ? 'text-red-500 hover:bg-red-50' : 'text-red-400 hover:bg-red-900/20'}`}
-                    title="Delete folder"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
 
