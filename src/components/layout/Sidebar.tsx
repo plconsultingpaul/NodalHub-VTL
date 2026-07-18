@@ -349,7 +349,7 @@ export default function Sidebar() {
               >
                 <button
                   onClick={() => toggleProjectExpanded(project.id)}
-                  className={`flex items-center gap-2 flex-1 px-3 py-2 transition-colors rounded-lg ${
+                  className={`flex items-center gap-2 flex-1 px-3 py-1 transition-colors rounded-lg ${
                     isLight ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white'
                   }`}
                 >
