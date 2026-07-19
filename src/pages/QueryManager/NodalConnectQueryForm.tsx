@@ -166,46 +166,41 @@ export default function NodalConnectQueryForm({
 
       setUserParameters(detected);
 
-      // Also detect result columns
+      // Detect result columns using PUT variant (requires executable to exist on server)
       setResultColumnsError('');
-      try {
-        const colUrl = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/detect-result-columns`;
-        const colBody: Record<string, unknown> = {
-          executableType: queryType === 'sql' ? 'SQL_QUERY' : 'STORED_PROCEDURE',
-          dbConnectionId: dbConnectionId,
-        };
-        if (queryType === 'sql') {
-          colBody.sqlQueryText = sqlText.replace(/@(\w+)/g, ':$1');
-        } else {
-          colBody.procName = procName;
-        }
-        // Provide empty test values for detected parameters so the API can execute
-        if (detected.length > 0) {
+      if (query?.name) {
+        try {
+          const colUrl = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(query.name)}/detect-result-columns`;
           const inputs: Record<string, string> = {};
           for (const p of detected) {
             inputs[p.name.replace(/^@/, '')] = '';
           }
-          colBody.inputs = inputs;
+          console.log('[detect-result-columns] PUT Request:', colUrl, inputs);
+          const colResp = await proxyFetch(colUrl, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(inputs),
+          });
+          const colData = await colResp.json();
+          console.log('[detect-result-columns] PUT Response:', colResp.status, colData);
+          if (colResp.ok && colData?.resultColumns) {
+            const colNames = typeof colData.resultColumns === 'string'
+              ? colData.resultColumns.split(',').map((c: string) => c.trim()).filter(Boolean)
+              : Array.isArray(colData.resultColumns)
+                ? colData.resultColumns.map((c: { name: string } | string) => typeof c === 'string' ? c : c.name)
+                : [];
+            if (colNames.length > 0) setResultColumns(colNames);
+          } else {
+            const errMsg = colData?.error || colData?.message || `Status ${colResp.status}`;
+            console.warn('[detect-result-columns] Failed:', errMsg);
+            setResultColumnsError(errMsg);
+          }
+        } catch (colErr) {
+          console.error('[detect-result-columns] Exception:', colErr);
+          setResultColumnsError(colErr instanceof Error ? colErr.message : 'Failed to detect result columns');
         }
-        console.log('[detect-result-columns] Request:', colUrl, colBody);
-        const colResp = await proxyFetch(colUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(colBody),
-        });
-        const colData = await colResp.json();
-        console.log('[detect-result-columns] Response:', colResp.status, colData);
-        if (colResp.ok && colData?.success && Array.isArray(colData.columns)) {
-          const cols = colData.columns.map((c: { name: string }) => c.name);
-          setResultColumns(cols);
-        } else {
-          const errMsg = colData?.error || colData?.details || `Status ${colResp.status}`;
-          console.warn('[detect-result-columns] Failed:', errMsg);
-          setResultColumnsError(errMsg);
-        }
-      } catch (colErr) {
-        console.error('[detect-result-columns] Exception:', colErr);
-        setResultColumnsError(colErr instanceof Error ? colErr.message : 'Failed to detect result columns');
+      } else {
+        setResultColumnsError('Result columns will be detected after first save.');
       }
     } catch (err) {
       setDetectError(err instanceof Error ? err.message : 'Failed to detect parameters');
@@ -365,47 +360,45 @@ export default function NodalConnectQueryForm({
   const detectResultColumns = async (queryName: string, endpoint: ApiEndpoint) => {
     try {
       const headers = getEndpointAuthHeaders(endpoint);
-      let url: string;
-      let method: string;
-      let body: Record<string, unknown>;
-
-      if (userParameters.length === 0) {
-        url = `${endpoint.url.replace(/\/$/, '')}/executables/manage/detect-result-columns`;
-        method = 'POST';
-        body = {
-          name: queryName,
-          executableType: queryType === 'sql' ? 'SQL_QUERY' : 'STORED_PROCEDURE',
-          dbConnectionId: dbConnectionId,
-          ...(queryType === 'sql' ? { sqlQueryText: sqlText.replace(/@(\w+)/g, ':$1') } : { procName }),
-        };
-      } else {
-        url = `${endpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(queryName)}/detect-result-columns`;
-        method = 'PUT';
-        body = {};
+      const url = `${endpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(queryName)}/detect-result-columns`;
+      const inputs: Record<string, string> = {};
+      for (const p of userParameters) {
+        inputs[p.name.replace(/^@/, '')] = '';
       }
-
-      const response = await proxyFetch(url, { method, headers, body: JSON.stringify(body) });
+      console.log('[detect-result-columns] POST-save PUT:', url, inputs);
+      const response = await proxyFetch(url, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(inputs),
+      });
+      const data = await response.json();
+      console.log('[detect-result-columns] POST-save response:', response.status, data);
 
       if (!response.ok) return;
 
-      const data = await response.json();
-      const columns: string[] = Array.isArray(data)
-        ? data.map((c: { name?: string; columnName?: string }) => c.name || c.columnName || '')
-        : (data?.columns || data?.resultColumns || []);
+      let cols: string[] = [];
+      if (typeof data?.resultColumns === 'string') {
+        cols = data.resultColumns.split(',').map((c: string) => c.trim()).filter(Boolean);
+      } else if (Array.isArray(data?.resultColumns)) {
+        cols = data.resultColumns.map((c: { name?: string } | string) => typeof c === 'string' ? c : (c.name || '')).filter(Boolean);
+      } else if (Array.isArray(data?.columns)) {
+        cols = data.columns.map((c: { name?: string } | string) => typeof c === 'string' ? c : (c.name || '')).filter(Boolean);
+      }
 
-      const filteredCols = columns.filter(Boolean);
-      if (filteredCols.length === 0) return;
+      if (cols.length === 0) return;
 
-      // Update the query's last_known_columns by name + company
+      setResultColumns(cols);
+      setResultColumnsError('');
+
       if (activeCompany?.id) {
         await supabase
           .from('queries')
-          .update({ last_known_columns: filteredCols })
+          .update({ last_known_columns: cols })
           .eq('name', queryName)
           .eq('company_id', activeCompany.id);
       }
-    } catch {
-      // Non-blocking - column detection is best-effort
+    } catch (err) {
+      console.error('[detect-result-columns] POST-save error:', err);
     }
   };
 
