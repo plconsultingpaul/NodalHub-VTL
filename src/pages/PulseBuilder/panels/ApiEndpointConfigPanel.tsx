@@ -144,7 +144,7 @@ export default function ApiEndpointConfigPanel({ config, onChange, inputVariable
     emit({ parameterValues: { ...paramValues, [name]: value } });
   };
 
-  const queryOptions = queries.map(q => ({
+  const queryOptions = queries.filter(q => q.app_target === 'pulse' || q.app_target === 'both').map(q => ({
     value: q.id,
     label: q.name,
   }));
