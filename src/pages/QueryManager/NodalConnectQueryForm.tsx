@@ -100,6 +100,7 @@ export default function NodalConnectQueryForm({
   const [resultColumns, setResultColumns] = useState<string[]>(
     (query?.last_known_columns as string[]) || []
   );
+  const [resultColumnsError, setResultColumnsError] = useState('');
   const [nameConflictChecking, setNameConflictChecking] = useState(false);
 
   useEffect(() => {
@@ -165,7 +166,8 @@ export default function NodalConnectQueryForm({
 
       setUserParameters(detected);
 
-      // Also detect result columns in parallel
+      // Also detect result columns
+      setResultColumnsError('');
       try {
         const colUrl = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/detect-result-columns`;
         const colBody: Record<string, unknown> = {
@@ -177,20 +179,33 @@ export default function NodalConnectQueryForm({
         } else {
           colBody.procName = procName;
         }
+        // Provide empty test values for detected parameters so the API can execute
+        if (detected.length > 0) {
+          const inputs: Record<string, string> = {};
+          for (const p of detected) {
+            inputs[p.name.replace(/^@/, '')] = '';
+          }
+          colBody.inputs = inputs;
+        }
+        console.log('[detect-result-columns] Request:', colUrl, colBody);
         const colResp = await proxyFetch(colUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(colBody),
         });
-        if (colResp.ok) {
-          const colData = await colResp.json();
-          if (colData?.success && Array.isArray(colData.columns)) {
-            const cols = colData.columns.map((c: { name: string }) => c.name);
-            setResultColumns(cols);
-          }
+        const colData = await colResp.json();
+        console.log('[detect-result-columns] Response:', colResp.status, colData);
+        if (colResp.ok && colData?.success && Array.isArray(colData.columns)) {
+          const cols = colData.columns.map((c: { name: string }) => c.name);
+          setResultColumns(cols);
+        } else {
+          const errMsg = colData?.error || colData?.details || `Status ${colResp.status}`;
+          console.warn('[detect-result-columns] Failed:', errMsg);
+          setResultColumnsError(errMsg);
         }
-      } catch {
-        // Non-blocking - result column detection is best-effort
+      } catch (colErr) {
+        console.error('[detect-result-columns] Exception:', colErr);
+        setResultColumnsError(colErr instanceof Error ? colErr.message : 'Failed to detect result columns');
       }
     } catch (err) {
       setDetectError(err instanceof Error ? err.message : 'Failed to detect parameters');
@@ -677,6 +692,9 @@ export default function NodalConnectQueryForm({
           </h4>
         </div>
         <div className="px-4 py-3">
+          {resultColumnsError && (
+            <p className="text-xs text-red-600 dark:text-red-400 mb-2">{resultColumnsError}</p>
+          )}
           {resultColumns.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">
               No result columns detected. Use "Detect" in Parameters to auto-discover.
