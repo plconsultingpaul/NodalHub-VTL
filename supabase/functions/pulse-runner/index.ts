@@ -817,7 +817,8 @@ Deno.serve(async (req: Request) => {
                 case "input_variable":
                   actionParamValues[paramKey] = inputVariables[mapping.sourceValue] || "";
                   break;
-                case "query_column": {
+                case "query_column":
+                case "query_field": {
                   const [varName, colName] = (mapping.sourceValue || "").split("::");
                   const ctxData = context[varName];
                   if (ctxData) {

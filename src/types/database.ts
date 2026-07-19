@@ -1102,7 +1102,7 @@ export interface PulseActionStepConfig {
   actionName?: string;
   parameterMappings: Array<{
     paramName: string;
-    source: 'query_column' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+    source: 'query_column' | 'query_field' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
     sourceValue: string;
     sourceNodeId?: string;
   }>;

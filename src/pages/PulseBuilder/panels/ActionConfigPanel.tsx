@@ -1,5 +1,5 @@
-import { useMemo, useEffect } from 'react';
-import { Zap, Loader2, FunctionSquare } from 'lucide-react';
+import { useMemo, useEffect, useState } from 'react';
+import { Zap, Loader2, FunctionSquare, Braces } from 'lucide-react';
 import { useQueries } from '../../../hooks/useQueries';
 import { useFixedValues } from '../../../hooks/useFixedValues';
 import { useLookupResolver } from '../../../hooks/useLookupResolver';
@@ -12,7 +12,7 @@ import type { PulseActionStepConfig, UserParameter, FixedValueListItem, PulseInp
 
 interface ParameterMapping {
   paramName: string;
-  source: 'query_column' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+  source: 'query_column' | 'query_field' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
   sourceValue: string;
   sourceNodeId?: string;
 }
@@ -96,11 +96,91 @@ function DateParamInput({
 
 const SOURCE_OPTIONS = [
   { value: 'hardcoded', label: 'Hardcoded Value' },
-  { value: 'query_column', label: 'Query Result Column' },
+  { value: 'query_field', label: 'Query Field' },
   { value: 'input_variable', label: 'Input Variable' },
   { value: 'fixed_value', label: 'Fixed Value' },
   { value: 'date_function', label: 'Date Function' },
 ];
+
+function QueryFieldPicker({
+  value,
+  onChange,
+  upstreamColumnOptions,
+  isDark,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  upstreamColumnOptions: { value: string; label: string }[];
+  isDark: boolean;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const selectedLabel = upstreamColumnOptions.find(o => o.value === value)?.label;
+
+  if (upstreamColumnOptions.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. variableName::columnName"
+          className="flex-1 px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+        <button
+          type="button"
+          disabled
+          className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-500 cursor-not-allowed"
+          title="Test the upstream query in Query Manager to load available fields"
+        >
+          <Braces className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          {selectedLabel ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
+              <Braces className="w-3 h-3 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <span className="text-xs font-mono text-amber-800 dark:text-amber-300 truncate">{selectedLabel}</span>
+            </div>
+          ) : (
+            <div className="px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-xs text-gray-400 dark:text-gray-500">
+              No field selected
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPicker(!showPicker)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors ${
+            showPicker
+              ? 'border-amber-400 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+              : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-600 dark:hover:text-amber-400'
+          }`}
+          title="Pick a field from upstream query"
+        >
+          <Braces className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {showPicker && (
+        <CustomDropdown
+          value={value}
+          onChange={(val) => {
+            onChange(val);
+            setShowPicker(false);
+          }}
+          options={upstreamColumnOptions}
+          placeholder="Select a field..."
+          dark={isDark}
+        />
+      )}
+    </div>
+  );
+}
 
 export default function ActionConfigPanel({ config, onChange, inputVariables, upstreamQueryNodes }: ActionConfigPanelProps) {
   const { queries } = useQueries();
@@ -214,14 +294,23 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
 
   const renderParameterMappingValue = (mapping: ParameterMapping, param: UserParameter) => {
     switch (mapping.source) {
-      case 'query_column':
+      case 'query_field':
         return (
-          <CustomDropdown
+          <QueryFieldPicker
             value={mapping.sourceValue || ''}
             onChange={(val) => handleMappingChange(mapping.paramName, { sourceValue: val })}
-            options={upstreamColumnOptions}
-            placeholder="Select column..."
-            dark={isDark}
+            upstreamColumnOptions={upstreamColumnOptions}
+            isDark={isDark}
+          />
+        );
+
+      case 'query_column':
+        return (
+          <QueryFieldPicker
+            value={mapping.sourceValue || ''}
+            onChange={(val) => handleMappingChange(mapping.paramName, { sourceValue: val })}
+            upstreamColumnOptions={upstreamColumnOptions}
+            isDark={isDark}
           />
         );
 
@@ -388,7 +477,7 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
                       })}
                       options={SOURCE_OPTIONS.filter(opt => {
                         if (opt.value === 'input_variable' && (!inputVariables || inputVariables.length === 0)) return false;
-                        if (opt.value === 'query_column' && upstreamColumnOptions.length === 0) return false;
+                        if (opt.value === 'query_field' && (!upstreamQueryNodes || upstreamQueryNodes.length === 0)) return false;
                         return true;
                       })}
                       placeholder="Select source..."
