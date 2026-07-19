@@ -374,7 +374,7 @@ export default function QueryTab({ draft, onChange }: QueryTabProps) {
           <CustomDropdown
             value={draft.query_id || ''}
             onChange={(val) => onChange({ query_id: val || null, parameter_values: {} })}
-            options={queries.map((q) => ({ value: q.id, label: q.name }))}
+            options={queries.filter(q => q.app_target === 'pulse' || q.app_target === 'both').map((q) => ({ value: q.id, label: q.name }))}
             placeholder="Select a query..."
             dark={isDark}
           />

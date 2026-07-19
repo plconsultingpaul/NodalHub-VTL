@@ -451,6 +451,7 @@ export interface Database {
           name: string;
           query_type: 'api_endpoint' | 'sql' | 'stored_procedure';
           purpose_type: 'query' | 'action' | 'lookup';
+          app_target: 'dashboard' | 'pulse' | 'both';
           api_endpoint_id: string | null;
           http_method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
           api_sub_path: string;
@@ -479,6 +480,7 @@ export interface Database {
           name: string;
           query_type?: 'api_endpoint' | 'sql' | 'stored_procedure';
           purpose_type?: 'query' | 'action' | 'lookup';
+          app_target?: 'dashboard' | 'pulse' | 'both';
           api_endpoint_id?: string | null;
           http_method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
           api_sub_path?: string;
@@ -507,6 +509,7 @@ export interface Database {
           name?: string;
           query_type?: 'api_endpoint' | 'sql' | 'stored_procedure';
           purpose_type?: 'query' | 'action' | 'lookup';
+          app_target?: 'dashboard' | 'pulse' | 'both';
           api_endpoint_id?: string | null;
           http_method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
           api_sub_path?: string;
@@ -1113,6 +1116,7 @@ export type ApiSpecWithEndpoint = ApiSpec & {
 export type Query = Database['public']['Tables']['queries']['Row'];
 export type QueryType = 'api_endpoint' | 'sql' | 'stored_procedure';
 export type QueryPurposeType = 'query' | 'action' | 'lookup';
+export type QueryAppTarget = 'dashboard' | 'pulse' | 'both';
 
 export type UserParameterDataType =
   | 'Text' | 'Date' | 'Integer' | 'Double' | 'Boolean'

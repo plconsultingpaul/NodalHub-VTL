@@ -21,7 +21,7 @@ import ApiEndpointQueryForm from './ApiEndpointQueryForm';
 import NodalConnectQueryForm from './NodalConnectQueryForm';
 import ImportNodalModal from './ImportNodalModal';
 import FixedValuesModal from './FixedValuesModal';
-import type { Query, QueryType, QueryPurposeType, QueryWithRelations, ApiEndpoint, UserParameter, RequestBodyFieldMapping } from '../../types/database';
+import type { Query, QueryType, QueryPurposeType, QueryAppTarget, QueryWithRelations, ApiEndpoint, UserParameter, RequestBodyFieldMapping } from '../../types/database';
 
 const QUERY_TYPE_CONFIG: Record<QueryType, { label: string; icon: typeof Globe; color: string }> = {
   api_endpoint: { label: 'API Endpoint', icon: Globe, color: 'bg-blue-100 text-blue-800' },
@@ -73,6 +73,7 @@ export default function QueryManager() {
   const [pendingTestQuery, setPendingTestQuery] = useState<QueryWithRelations | null>(null);
   const [testParamValues, setTestParamValues] = useState<Record<string, string>>({});
   const [purposeTypeFilter, setPurposeTypeFilter] = useState<'all' | QueryPurposeType>('all');
+  const [appTargetFilter, setAppTargetFilter] = useState<'all' | QueryAppTarget>('all');
   const [showImportModal, setShowImportModal] = useState(false);
   const [refreshingQueryId, setRefreshingQueryId] = useState<string | null>(null);
   const [testResponseExpanded, setTestResponseExpanded] = useState(false);
@@ -95,9 +96,15 @@ export default function QueryManager() {
   const { openDashboard } = useActiveDashboards();
 
   const filteredQueries = useMemo(() => {
-    if (purposeTypeFilter === 'all') return queries;
-    return queries.filter(q => q.purpose_type === purposeTypeFilter);
-  }, [queries, purposeTypeFilter]);
+    let result = queries;
+    if (purposeTypeFilter !== 'all') {
+      result = result.filter(q => q.purpose_type === purposeTypeFilter);
+    }
+    if (appTargetFilter !== 'all') {
+      result = result.filter(q => q.app_target === appTargetFilter || q.app_target === 'both');
+    }
+    return result;
+  }, [queries, purposeTypeFilter, appTargetFilter]);
 
   const dashboardFolders = useMemo(() =>
     projects.filter(p => p.type === 'dashboards'),
@@ -831,6 +838,18 @@ export default function QueryManager() {
                 size="sm"
                 className="w-36"
               />
+              <CustomDropdown
+                value={appTargetFilter}
+                onChange={(val) => setAppTargetFilter(val as 'all' | QueryAppTarget)}
+                options={[
+                  { value: 'all', label: 'All Apps' },
+                  { value: 'dashboard', label: 'Dashboard' },
+                  { value: 'pulse', label: 'Pulse' },
+                  { value: 'both', label: 'Both' }
+                ]}
+                size="sm"
+                className="w-36"
+              />
               <Button variant="secondary" onClick={() => setShowFixedValues(true)}>
                 <Hash className="w-4 h-4" />
                 Fixed Values
@@ -908,6 +927,9 @@ export default function QueryManager() {
                     Purpose
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Application
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Type
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -930,6 +952,11 @@ export default function QueryManager() {
                     : query.purpose_type === 'lookup'
                     ? 'bg-violet-100 text-violet-800'
                     : 'bg-sky-100 text-sky-800';
+                  const appBadge = query.app_target === 'dashboard'
+                    ? 'bg-blue-100 text-blue-800'
+                    : query.app_target === 'pulse'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-gray-100 text-gray-800';
 
                   return (
                     <tr key={query.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
@@ -944,6 +971,11 @@ export default function QueryManager() {
                       <td className="px-6 py-2">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${purposeBadge}`}>
                           {query.purpose_type === 'action' ? 'Action' : query.purpose_type === 'lookup' ? 'Lookup' : 'Query'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${appBadge}`}>
+                          {query.app_target === 'dashboard' ? 'Dashboard' : query.app_target === 'pulse' ? 'Pulse' : 'Both'}
                         </span>
                       </td>
                       <td className="px-6 py-2">

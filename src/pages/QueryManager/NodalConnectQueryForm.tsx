@@ -7,7 +7,7 @@ import { proxyFetch } from '../../lib/apiProxy';
 import { supabase } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
 import CustomDropdown from '../../components/ui/CustomDropdown';
-import type { Query, QueryType, QueryPurposeType, UserParameter, UserParameterDataType, NodalDatabase, ApiEndpoint } from '../../types/database';
+import type { Query, QueryType, QueryPurposeType, QueryAppTarget, UserParameter, UserParameterDataType, NodalDatabase, ApiEndpoint } from '../../types/database';
 
 interface NodalConnectQueryFormProps {
   queryType: 'sql' | 'stored_procedure';
@@ -83,6 +83,7 @@ export default function NodalConnectQueryForm({
 
   const [name, setName] = useState(query?.name || '');
   const [purposeType, setPurposeType] = useState<QueryPurposeType>(query?.purpose_type || 'query');
+  const [appTarget, setAppTarget] = useState<QueryAppTarget>(query?.app_target || 'both');
   const [dbConnectionId, setDbConnectionId] = useState(query?.nodal_db_connection_id || '');
   const [sqlText, setSqlText] = useState(query?.sql_query_text || '');
   const [procName, setProcName] = useState(query?.proc_name || '');
@@ -102,6 +103,7 @@ export default function NodalConnectQueryForm({
     if (query) {
       setName(query.name);
       setPurposeType(query.purpose_type);
+      setAppTarget(query.app_target || 'both');
       setDbConnectionId(query.nodal_db_connection_id || '');
       setSqlText(query.sql_query_text || '');
       setProcName(query.proc_name || '');
@@ -293,6 +295,7 @@ export default function NodalConnectQueryForm({
       name: name.trim(),
       query_type: queryType as QueryType,
       purpose_type: purposeType,
+      app_target: appTarget,
       nodal_db_connection_id: dbConnectionId || null,
       sql_query_text: queryType === 'sql' ? sqlText : null,
       proc_name: queryType === 'stored_procedure' ? procName : null,
@@ -403,19 +406,35 @@ export default function NodalConnectQueryForm({
           </p>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Purpose Type
-          </label>
-          <CustomDropdown
-            value={purposeType}
-            onChange={(val) => setPurposeType(val as QueryPurposeType)}
-            options={[
-              { value: 'query', label: 'Query' },
-              { value: 'action', label: 'Action' },
-              { value: 'lookup', label: 'Lookup' },
-            ]}
-          />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Purpose Type
+            </label>
+            <CustomDropdown
+              value={purposeType}
+              onChange={(val) => setPurposeType(val as QueryPurposeType)}
+              options={[
+                { value: 'query', label: 'Query' },
+                { value: 'action', label: 'Action' },
+                { value: 'lookup', label: 'Lookup' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Application <span className="text-red-500">*</span>
+            </label>
+            <CustomDropdown
+              value={appTarget}
+              onChange={(val) => setAppTarget(val as QueryAppTarget)}
+              options={[
+                { value: 'dashboard', label: 'Dashboard' },
+                { value: 'pulse', label: 'Pulse' },
+                { value: 'both', label: 'Both' },
+              ]}
+            />
+          </div>
         </div>
 
         {purposeType === 'lookup' && (

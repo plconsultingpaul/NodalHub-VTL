@@ -5,7 +5,7 @@ import { useQueries, QueryParameter } from '../../hooks/useQueries';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import Button from '../../components/ui/Button';
 import CustomDropdown from '../../components/ui/CustomDropdown';
-import type { ApiEndpoint, ApiSpecEndpoint, Query, ApiSpecField, UserParameter, UserParameterDataType, UserParameterTarget, FixedValue, RequestBodyFieldMapping, RequestBodyFieldDataType, QueryPurposeType } from '../../types/database';
+import type { ApiEndpoint, ApiSpecEndpoint, Query, ApiSpecField, UserParameter, UserParameterDataType, UserParameterTarget, FixedValue, RequestBodyFieldMapping, RequestBodyFieldDataType, QueryPurposeType, QueryAppTarget } from '../../types/database';
 
 interface ApiEndpointQueryFormProps {
   query?: Query | null;
@@ -138,6 +138,7 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
 
   const [name, setName] = useState(query?.name || '');
   const [purposeType, setPurposeType] = useState<QueryPurposeType>(query?.purpose_type || 'query');
+  const [appTarget, setAppTarget] = useState<QueryAppTarget>(query?.app_target || 'both');
   const [lookupValueField, setLookupValueField] = useState(query?.lookup_value_field || '');
   const [lookupLabelField, setLookupLabelField] = useState(query?.lookup_label_field || '');
   const [selectedEndpointId, setSelectedEndpointId] = useState(query?.api_endpoint_id || '');
@@ -709,6 +710,7 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
     const saveData = {
       name,
       purpose_type: purposeType,
+      app_target: appTarget,
       query_type: 'api_endpoint',
       api_endpoint_id: selectedEndpointId || null,
       http_method: httpMethod as Query['http_method'],
@@ -756,18 +758,31 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
         )}
       </div>
 
-      <div>
-        <label className="block text-sm font-medium text-orange-500 mb-1">Type</label>
-        <CustomDropdown
-          value={purposeType}
-          onChange={(val) => setPurposeType(val as QueryPurposeType)}
-          options={[
-            { value: 'query', label: 'Query' },
-            { value: 'action', label: 'Action' },
-            { value: 'lookup', label: 'Lookup' }
-          ]}
-          className="w-48"
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-orange-500 mb-1">Type</label>
+          <CustomDropdown
+            value={purposeType}
+            onChange={(val) => setPurposeType(val as QueryPurposeType)}
+            options={[
+              { value: 'query', label: 'Query' },
+              { value: 'action', label: 'Action' },
+              { value: 'lookup', label: 'Lookup' }
+            ]}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-orange-500 mb-1">Application <span className="text-red-500">*</span></label>
+          <CustomDropdown
+            value={appTarget}
+            onChange={(val) => setAppTarget(val as QueryAppTarget)}
+            options={[
+              { value: 'dashboard', label: 'Dashboard' },
+              { value: 'pulse', label: 'Pulse' },
+              { value: 'both', label: 'Both' }
+            ]}
+          />
+        </div>
       </div>
 
       {purposeType === 'lookup' && (

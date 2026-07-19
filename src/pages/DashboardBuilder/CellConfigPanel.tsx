@@ -181,7 +181,7 @@ export default function CellConfigPanel({
         <CustomDropdown
           value={cell.query_id || ''}
           onChange={(val) => onUpdate({ query_id: val || null })}
-          options={queries.map((query) => ({ value: query.id, label: query.name }))}
+          options={queries.filter(q => q.app_target === 'dashboard' || q.app_target === 'both').map((query) => ({ value: query.id, label: query.name }))}
           placeholder="Select a query"
         />
       </div>
@@ -375,7 +375,7 @@ export default function CellConfigPanel({
                       onChange={(val) =>
                         onUpdateDrilldown(index, { query_id: val })
                       }
-                      options={queries.map((query) => ({ value: query.id, label: query.name }))}
+                      options={queries.filter(q => q.app_target === 'dashboard' || q.app_target === 'both').map((query) => ({ value: query.id, label: query.name }))}
                       placeholder="Select a query"
                       size="sm"
                     />
