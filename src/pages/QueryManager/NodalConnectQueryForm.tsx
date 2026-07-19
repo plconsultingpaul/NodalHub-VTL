@@ -97,6 +97,9 @@ export default function NodalConnectQueryForm({
 
   const [detectingParams, setDetectingParams] = useState(false);
   const [detectError, setDetectError] = useState('');
+  const [resultColumns, setResultColumns] = useState<string[]>(
+    (query?.last_known_columns as string[]) || []
+  );
   const [nameConflictChecking, setNameConflictChecking] = useState(false);
 
   useEffect(() => {
@@ -161,6 +164,34 @@ export default function NodalConnectQueryForm({
       }));
 
       setUserParameters(detected);
+
+      // Also detect result columns in parallel
+      try {
+        const colUrl = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/detect-result-columns`;
+        const colBody: Record<string, unknown> = {
+          executableType: queryType === 'sql' ? 'SQL_QUERY' : 'STORED_PROCEDURE',
+          dbConnectionId: dbConnectionId,
+        };
+        if (queryType === 'sql') {
+          colBody.sqlQueryText = sqlText.replace(/@(\w+)/g, ':$1');
+        } else {
+          colBody.procName = procName;
+        }
+        const colResp = await proxyFetch(colUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(colBody),
+        });
+        if (colResp.ok) {
+          const colData = await colResp.json();
+          if (colData?.success && Array.isArray(colData.columns)) {
+            const cols = colData.columns.map((c: { name: string }) => c.name);
+            setResultColumns(cols);
+          }
+        }
+      } catch {
+        // Non-blocking - result column detection is best-effort
+      }
     } catch (err) {
       setDetectError(err instanceof Error ? err.message : 'Failed to detect parameters');
     } finally {
@@ -305,6 +336,7 @@ export default function NodalConnectQueryForm({
       api_sub_path: 'executables/run',
       lookup_value_field: purposeType === 'lookup' ? (lookupValueField.trim() || null) : null,
       lookup_label_field: purposeType === 'lookup' ? (lookupLabelField.trim() || null) : null,
+      last_known_columns: resultColumns.length > 0 ? resultColumns : undefined,
     };
 
     await onSave(queryData);
@@ -635,6 +667,33 @@ export default function NodalConnectQueryForm({
             ))}
           </div>
         )}
+      </div>
+
+      {/* Result Columns */}
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Result Columns ({resultColumns.length})
+          </h4>
+        </div>
+        <div className="px-4 py-3">
+          {resultColumns.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              No result columns detected. Use "Detect" in Parameters to auto-discover.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {resultColumns.map((col) => (
+                <span
+                  key={col}
+                  className="inline-flex items-center px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600"
+                >
+                  {col}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Footer */}
