@@ -1094,11 +1094,29 @@ export interface PulseEmailStepConfig {
   includeHeaderRow?: boolean;
 }
 
+export interface PulseActionStepConfig {
+  stepType: 'action';
+  name: string;
+  stepName: string;
+  queryId?: string;
+  actionName?: string;
+  parameterMappings: Array<{
+    paramName: string;
+    source: 'query_column' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+    sourceValue: string;
+    sourceNodeId?: string;
+  }>;
+  onError?: 'stop' | 'continue';
+  timeout?: number;
+  retryCount?: number;
+}
+
 export type PulseStepConfig =
   | PulseTriggerStepConfig
   | PulseQueryStepConfig
   | PulseConditionStepConfig
-  | PulseEmailStepConfig;
+  | PulseEmailStepConfig
+  | PulseActionStepConfig;
 
 export type ProjectWithDashboards = Project & {
   dashboards: Dashboard[];

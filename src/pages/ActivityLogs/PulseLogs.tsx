@@ -78,6 +78,7 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   apiEndpoint: 'Api Endpoint',
   condition: 'Conditional Check',
   email: 'Email',
+  action: 'Action',
 };
 
 const STEP_ICONS: Record<string, typeof Globe> = {
@@ -86,6 +87,7 @@ const STEP_ICONS: Record<string, typeof Globe> = {
   apiEndpoint: Globe,
   condition: GitBranch,
   email: Mail,
+  action: Zap,
 };
 
 function formatTime(iso: string) {

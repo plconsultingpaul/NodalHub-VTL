@@ -20,17 +20,20 @@ import TriggerNode from './nodes/TriggerNode';
 import ApiEndpointNode from './nodes/ApiEndpointNode';
 import ConditionNode from './nodes/ConditionNode';
 import EmailNode from './nodes/EmailNode';
+import ActionNode from './nodes/ActionNode';
 import TriggerConfigPanel from './panels/TriggerConfigPanel';
 import ApiEndpointConfigPanel from './panels/ApiEndpointConfigPanel';
 import EmailConfigPanel from './panels/EmailConfigPanel';
 import ConditionConfigPanel from './panels/ConditionConfigPanel';
-import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseInputVariable, PulseSchedule } from '../../types/database';
+import ActionConfigPanel from './panels/ActionConfigPanel';
+import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseActionStepConfig, PulseInputVariable, PulseSchedule } from '../../types/database';
 
 const nodeTypes = {
   trigger: TriggerNode,
   query: ApiEndpointNode,
   condition: ConditionNode,
   email: EmailNode,
+  action: ActionNode,
 };
 
 const defaultTriggerNode: Node = {
@@ -229,6 +232,16 @@ export default function WorkflowCanvas({
         stepName: emailConfig.name,
         recipientCount,
       });
+    } else if (config.stepType === 'action') {
+      const actionConfig = config as PulseActionStepConfig;
+      const isConfigured = !!actionConfig.queryId;
+      const label = actionConfig.stepName || 'Action';
+      updateNodeData(nodeId, {
+        configured: isConfigured,
+        label,
+        stepName: actionConfig.stepName,
+        actionName: actionConfig.actionName,
+      });
     }
   }, [updateNodeData]);
 
@@ -307,6 +320,7 @@ export default function WorkflowCanvas({
 
       const labelMap: Record<string, string> = {
         query: 'Query',
+        action: 'Action',
         condition: 'Condition',
         email: 'Email',
       };
@@ -510,6 +524,30 @@ export default function WorkflowCanvas({
           onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
           upstreamNodes={upstreamApiNodes}
           inputVariables={inputVariables}
+        />
+      );
+    }
+
+    if (selectedNode.type === 'action') {
+      const config = stepConfigs[selectedNode.id] as PulseActionStepConfig | undefined;
+      const upstreamQueryNodes = nodes
+        .filter(n => n.type === 'query' && stepConfigs[n.id])
+        .map(n => {
+          const qConfig = stepConfigs[n.id] as PulseQueryStepConfig;
+          return {
+            id: n.id,
+            label: qConfig.stepName || 'Query',
+            queryId: qConfig.queryId,
+            responseVariableName: qConfig.responseVariableName,
+            lastKnownColumns: (qConfig as unknown as { lastKnownColumns?: string[] }).lastKnownColumns || [],
+          };
+        });
+      return (
+        <ActionConfigPanel
+          config={config || null}
+          onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
+          inputVariables={inputVariables}
+          upstreamQueryNodes={upstreamQueryNodes}
         />
       );
     }

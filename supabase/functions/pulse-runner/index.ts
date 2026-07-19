@@ -786,6 +786,183 @@ Deno.serve(async (req: Request) => {
               await executeNode(edge.target);
             }
           }
+        } else if (node.type === "action" && config) {
+          try {
+            const queryId = config.queryId as string;
+            if (!queryId) throw new Error("Action step has no action configured");
+
+            const { data: actionQuery, error: aqErr } = await admin
+              .from("queries")
+              .select("*, api_endpoints(*)")
+              .eq("id", queryId)
+              .maybeSingle();
+            if (aqErr || !actionQuery) throw new Error(aqErr?.message || "Action query not found");
+            const actionEndpoint = actionQuery.api_endpoints as Record<string, unknown> | null;
+            if (!actionEndpoint) throw new Error("Action has no API endpoint");
+
+            const paramMappings = (config.parameterMappings || []) as Array<{
+              paramName: string;
+              source: string;
+              sourceValue: string;
+              sourceNodeId?: string;
+            }>;
+
+            const actionParamValues: Record<string, string> = {};
+            for (const mapping of paramMappings) {
+              const paramKey = mapping.paramName.startsWith("@") ? mapping.paramName : `@${mapping.paramName}`;
+              switch (mapping.source) {
+                case "hardcoded":
+                  actionParamValues[paramKey] = mapping.sourceValue || "";
+                  break;
+                case "input_variable":
+                  actionParamValues[paramKey] = inputVariables[mapping.sourceValue] || "";
+                  break;
+                case "query_column": {
+                  const [varName, colName] = (mapping.sourceValue || "").split("::");
+                  const ctxData = context[varName];
+                  if (ctxData) {
+                    const rows = flattenRows(ctxData);
+                    if (rows.length > 0 && colName) {
+                      actionParamValues[paramKey] = String(rows[0][colName] ?? "");
+                    } else {
+                      actionParamValues[paramKey] = "";
+                    }
+                  } else {
+                    actionParamValues[paramKey] = "";
+                  }
+                  break;
+                }
+                case "fixed_value": {
+                  if (mapping.sourceValue) {
+                    const { data: fv } = await admin
+                      .from("fixed_values")
+                      .select("value, resolved_value")
+                      .eq("id", mapping.sourceValue)
+                      .maybeSingle();
+                    actionParamValues[paramKey] = fv?.resolved_value || fv?.value || "";
+                  } else {
+                    actionParamValues[paramKey] = "";
+                  }
+                  break;
+                }
+                case "date_function": {
+                  if (mapping.sourceValue && mapping.sourceValue.startsWith(DATE_FUNCTION_PREFIX)) {
+                    const fnId = mapping.sourceValue.slice(DATE_FUNCTION_PREFIX.length);
+                    const { data: fn } = await admin
+                      .from("date_functions")
+                      .select("base_date, string_format, adjust_years, adjust_months, adjust_days")
+                      .eq("id", fnId)
+                      .maybeSingle();
+                    if (fn) {
+                      actionParamValues[paramKey] = computeDateFunctionValue(
+                        fn.base_date as string,
+                        fn.string_format as string,
+                        fn.adjust_years as number,
+                        fn.adjust_months as number,
+                        fn.adjust_days as number
+                      );
+                    } else {
+                      actionParamValues[paramKey] = "";
+                    }
+                  } else {
+                    actionParamValues[paramKey] = mapping.sourceValue || "";
+                  }
+                  break;
+                }
+                default:
+                  actionParamValues[paramKey] = mapping.sourceValue || "";
+              }
+            }
+
+            if (Object.keys(inputVariables).length > 0) {
+              for (const [key, val] of Object.entries(actionParamValues)) {
+                actionParamValues[key] = val.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                  if (varName in inputVariables) return inputVariables[varName];
+                  return _m;
+                });
+              }
+            }
+
+            const actionUrl = buildQueryUrl(
+              actionEndpoint.url as string,
+              actionQuery.api_sub_path || "",
+              (actionQuery.query_parameters || []) as QueryParameter[],
+              actionQuery.url_query_string || "",
+              actionParamValues,
+              (actionQuery.path_variable_config || {}) as Record<string, string>
+            );
+            const actionHeaders = buildAuthHeaders(actionEndpoint);
+            const actionFetchOptions: RequestInit = { method: actionQuery.http_method, headers: actionHeaders };
+            if (["POST", "PUT", "PATCH"].includes(actionQuery.http_method)) {
+              if (actionQuery.request_body_template) {
+                try {
+                  const body = JSON.parse(actionQuery.request_body_template);
+                  const mappings = (actionQuery.request_body_field_mappings || []) as Array<{ fieldName: string; value: string; type: string; dataType: string }>;
+                  mappings.forEach((m) => {
+                    let resolvedValue = m.value;
+                    if (m.type === "parameter" && m.value) {
+                      resolvedValue = actionParamValues[m.value] || "";
+                    } else if (m.type === "hardcoded") {
+                      resolvedValue = substituteParams(resolvedValue, actionParamValues);
+                    }
+                    if (Object.keys(inputVariables).length > 0) {
+                      resolvedValue = resolvedValue.replace(/\{\{(.+?)\}\}/g, (_match, vName) => {
+                        if (vName in inputVariables) return inputVariables[vName];
+                        return _match;
+                      });
+                    }
+                    setNestedValue(body, m.fieldName, convertFieldValue(resolvedValue, m.dataType));
+                  });
+                  actionFetchOptions.body = JSON.stringify(body);
+                } catch { /* fall through */ }
+              }
+              if (!actionFetchOptions.body && actionQuery.json_parameters && Object.keys(actionQuery.json_parameters).length) {
+                actionFetchOptions.body = substituteParams(JSON.stringify(actionQuery.json_parameters), actionParamValues);
+              }
+              if (!actionFetchOptions.body && (actionEndpoint.endpoint_type === "nodal_connect" || actionQuery.nodal_db_connection_id)) {
+                const inputs: Record<string, string> = {};
+                Object.entries(actionParamValues).forEach(([key, val]) => {
+                  inputs[key.replace(/^@/, "")] = val;
+                });
+                actionFetchOptions.body = JSON.stringify({ name: actionQuery.name, inputs });
+              }
+            }
+
+            console.log(`[pulse-runner] Action step "${stepName}": ${actionQuery.http_method} ${actionUrl}`);
+            const actionRes = await fetch(actionUrl, actionFetchOptions);
+            const actionText = await actionRes.text();
+
+            if (!actionRes.ok) {
+              const onError = config.onError || "stop";
+              stepResults.push({
+                nodeId, name: stepName, type: "action", status: "error",
+                error: `HTTP ${actionRes.status}: ${actionText.slice(0, 300)}`,
+                inputs: { url: actionUrl, method: actionQuery.http_method, parameters: actionParamValues },
+                startedAt: stepStart, finishedAt: new Date().toISOString(),
+              });
+              if (onError === "stop") throw new Error(`Action failed (${actionRes.status}): ${actionText.slice(0, 300)}`);
+            } else {
+              let responsePreview: unknown;
+              try { responsePreview = JSON.parse(actionText); } catch { responsePreview = actionText.slice(0, 200); }
+              stepResults.push({
+                nodeId, name: stepName, type: "action", status: "success",
+                inputs: { url: actionUrl, method: actionQuery.http_method, parameters: actionParamValues },
+                outputs: { statusCode: actionRes.status, responsePreview: typeof responsePreview === "object" ? JSON.stringify(responsePreview).slice(0, 200) : responsePreview },
+                startedAt: stepStart, finishedAt: new Date().toISOString(),
+              });
+            }
+
+            const nextEdges = adjacency.get(nodeId) || [];
+            for (const edge of nextEdges) {
+              await executeNode(edge.target);
+            }
+          } catch (err) {
+            const existingResult = stepResults.find(s => s.nodeId === nodeId);
+            if (!existingResult) {
+              stepResults.push({ nodeId, name: stepName, type: "action", status: "error", error: err instanceof Error ? err.message : String(err), startedAt: stepStart, finishedAt: new Date().toISOString() });
+            }
+            throw err;
+          }
         } else if (node.type === "email" && config) {
           try {
             const toRecipients = (config.toRecipients || []) as string[];

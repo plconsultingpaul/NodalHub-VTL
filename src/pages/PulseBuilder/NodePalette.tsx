@@ -1,5 +1,5 @@
 import { type DragEvent } from 'react';
-import { Clock, Database, GitBranch, Mail } from 'lucide-react';
+import { Clock, Database, GitBranch, Mail, Zap } from 'lucide-react';
 
 const nodeTypes = [
   {
@@ -16,6 +16,14 @@ const nodeTypes = [
     description: 'Run a saved query',
     icon: Database,
     color: 'green',
+    disabled: false,
+  },
+  {
+    type: 'action',
+    label: 'Action',
+    description: 'Run a post-query action',
+    icon: Zap,
+    color: 'orange',
     disabled: false,
   },
   {
@@ -39,6 +47,7 @@ const nodeTypes = [
 const colorMap: Record<string, { bg: string; text: string; border: string }> = {
   blue: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
   green: { bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-800' },
+  orange: { bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-200 dark:border-orange-800' },
   amber: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
   violet: { bg: 'bg-violet-50 dark:bg-violet-900/20', text: 'text-violet-600 dark:text-violet-400', border: 'border-violet-200 dark:border-violet-800' },
 };
