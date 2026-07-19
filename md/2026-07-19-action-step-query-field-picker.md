@@ -1,33 +1,21 @@
-# 2026-07-19 Action Step Query Field Picker
+# 2026-07-19 Action Step Query Field Picker Fix
 
-## Summary
+## Problem
 
-Updated the Action step's parameter mapping in the Pulse workflow to include a "Query Field" source option with a `{ }` field picker button that lets users select columns from upstream query results.
+The `{ }` Query Field button in the Pulse Workflow Action Config Panel showed no columns, even though the upstream query had Result Columns populated via "Detect" in the Query Manager.
+
+**Root cause:** The `last_known_columns` for "Temp Controlled Shipping Instruc" was stored as malformed data -- the raw JSON response string `[{"name":"DETAIL_LINE_ID","type":"INTEGER"}]` had been split on commas and stored as individual garbage array elements (`["[{\"name\":\"DETAIL_LINE_ID\"", "\"type\":\"INTEGER\"}]"]`). The code consuming `last_known_columns` had no defense against this format and silently produced empty column lists.
 
 ## Changes
 
-### Modified Files
+### `src/pages/PulseBuilder/panels/ActionConfigPanel.tsx`
 
-- **`src/pages/PulseBuilder/panels/ActionConfigPanel.tsx`**
-  - Renamed source option from "Query Result Column" to "Query Field"
-  - Changed filter logic: "Query Field" now shows whenever there's at least one upstream query node (not hidden when columns are empty)
-  - Added `QueryFieldPicker` component with:
-    - A `{ }` (Braces icon) button that toggles a CustomDropdown of available fields
-    - When a field is selected, displays it in an amber-highlighted chip with the `{ }` icon
-    - When no columns are available (query hasn't been tested), shows a text input fallback with a disabled `{ }` button as a hint
-  - Added `useState` and `Braces` icon imports
-  - Added `'query_field'` to the ParameterMapping source union type
+- **`upstreamColumnOptions` memo (line ~258):** Added normalization when reading `last_known_columns`. Each element is checked: plain strings are kept as-is, objects with a `.name` property are unwrapped, and garbage fragments (starting with `[`, `{`, or `"`) are filtered out.
 
-- **`src/types/database.ts`**
-  - Added `'query_field'` to the `PulseActionStepConfig.parameterMappings[].source` union type
+### `src/pages/QueryManager/NodalConnectQueryForm.tsx`
 
-- **`supabase/functions/pulse-runner/index.ts`**
-  - Added `"query_field"` as an alias for `"query_column"` in the parameter resolution switch (both resolve identically from upstream context data)
+- **`resultColumns` state initializer (line ~100):** Same normalization applied when loading `query?.last_known_columns` into local state, so the Result Columns display always shows clean column names regardless of how the data was stored.
 
-## How It Works
+### Database
 
-1. In the Action config panel, select "Query Field" as the parameter source
-2. Click the `{ }` button to open a dropdown of available fields from the upstream query
-3. Fields are populated from the query's `last_known_columns` (set when the query is tested in Query Manager)
-4. If no columns are available yet, the user can manually type a `variableName::columnName` reference or test the query first
-5. At runtime, the pulse-runner resolves the field by looking up the column value from the first row of the upstream query's stored response
+- Fixed the corrupted `last_known_columns` value on "Temp Controlled Shipping Instruc" from `["[{\"name\":\"DETAIL_LINE_ID\"", "\"type\":\"INTEGER\"}]"]` to `["DETAIL_LINE_ID"]`.

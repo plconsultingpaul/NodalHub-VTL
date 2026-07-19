@@ -97,9 +97,19 @@ export default function NodalConnectQueryForm({
 
   const [detectingParams, setDetectingParams] = useState(false);
   const [detectError, setDetectError] = useState('');
-  const [resultColumns, setResultColumns] = useState<string[]>(
-    (query?.last_known_columns as string[]) || []
-  );
+  const [resultColumns, setResultColumns] = useState<string[]>(() => {
+    const raw = (query?.last_known_columns as unknown[]) || [];
+    return raw
+      .map((c: unknown) => {
+        if (typeof c === 'string') {
+          if (c.startsWith('[') || c.startsWith('{') || c.startsWith('"')) return null;
+          return c;
+        }
+        if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name;
+        return null;
+      })
+      .filter((c): c is string => !!c);
+  });
   const [resultColumnsError, setResultColumnsError] = useState('');
   const [nameConflictChecking, setNameConflictChecking] = useState(false);
 

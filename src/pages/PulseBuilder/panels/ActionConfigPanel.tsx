@@ -259,7 +259,17 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
     const options: { value: string; label: string }[] = [];
     (upstreamQueryNodes || []).forEach(node => {
       const queryRecord = queries.find(q => q.id === node.queryId);
-      const columns = (queryRecord?.last_known_columns as string[]) || node.lastKnownColumns || [];
+      const raw = (queryRecord?.last_known_columns as unknown[]) || node.lastKnownColumns || [];
+      const columns: string[] = raw
+        .map((c: unknown) => {
+          if (typeof c === 'string') {
+            if (c.startsWith('[') || c.startsWith('{') || c.startsWith('"')) return null;
+            return c;
+          }
+          if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name;
+          return null;
+        })
+        .filter((c): c is string => !!c);
       if (columns.length > 0) {
         const varName = node.responseVariableName || node.id;
         columns.forEach(col => {
