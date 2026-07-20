@@ -185,7 +185,12 @@ export default function ApiEndpointConfigPanel({ config, onChange, inputVariable
           value={current.queryId || ''}
           onChange={(val) => {
             const q = queries.find(qq => qq.id === val);
-            emit({ queryId: val || undefined, queryName: q?.name || undefined, parameterValues: {} });
+            const updates: Partial<PulseQueryStepConfig> = { queryId: val || undefined, queryName: q?.name || undefined, parameterValues: {} };
+            if (!current.stepName && q?.name) {
+              updates.stepName = q.name;
+              updates.name = q.name;
+            }
+            emit(updates);
           }}
           options={queryOptions}
           placeholder="Select a query..."
