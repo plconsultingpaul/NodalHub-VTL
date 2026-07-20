@@ -690,21 +690,37 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
           .eq('id', qId)
           .maybeSingle();
         if (!query) continue;
-        const rawCols = (query.last_known_columns || []) as (string | { name: string })[];
-        const lastKnown = rawCols.map(c => typeof c === 'string' ? c : c.name).filter(Boolean);
-        if (lastKnown.length > 0) {
-          for (const c of lastKnown) { if (!allCols.includes(c)) allCols.push(c); }
+        const raw = (query.last_known_columns || []) as string[];
+        if (raw.length === 0) {
+          const ep = query.api_endpoints as { id: string } | null;
+          if (ep) {
+            const { data: fields } = await supabase
+              .from('api_endpoint_fields')
+              .select('field_name')
+              .eq('endpoint_id', ep.id)
+              .eq('field_type', 'response')
+              .order('field_name');
+            for (const f of (fields || [])) { if (!allCols.includes(f.field_name)) allCols.push(f.field_name); }
+          }
           continue;
         }
-        const ep = query.api_endpoints as { id: string } | null;
-        if (ep) {
-          const { data: fields } = await supabase
-            .from('api_endpoint_fields')
-            .select('field_name')
-            .eq('endpoint_id', ep.id)
-            .eq('field_type', 'response')
-            .order('field_name');
-          for (const f of (fields || [])) { if (!allCols.includes(f.field_name)) allCols.push(f.field_name); }
+        // Handle two storage formats:
+        // 1. Clean: ["COL_A", "COL_B"]
+        // 2. Corrupted fragments of JSON objects that need rejoining
+        const firstEl = raw[0];
+        if (firstEl.startsWith('[') || firstEl.includes('"name"')) {
+          try {
+            const joined = raw.join(',');
+            const parsed = JSON.parse(joined) as { name: string }[];
+            for (const item of parsed) { if (item.name && !allCols.includes(item.name)) allCols.push(item.name); }
+          } catch {
+            // Try extracting "name":"VALUE" patterns via regex
+            const joined = raw.join(',');
+            const matches = joined.matchAll(/"name"\s*:\s*"([^"]+)"/g);
+            for (const m of matches) { if (!allCols.includes(m[1])) allCols.push(m[1]); }
+          }
+        } else {
+          for (const c of raw) { if (!allCols.includes(c)) allCols.push(c); }
         }
       }
       setRecipientColumns(allCols);

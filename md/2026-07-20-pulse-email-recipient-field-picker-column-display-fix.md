@@ -1,18 +1,24 @@
-# Pulse Email Recipient Field Picker - Column Name Display Fix
+# Pulse Email Recipient Field Picker - Column Display Fix
 
 ## Summary
 
-Fixed the `{ }` field picker dropdown in the Pulse Email step To/CC/BCC fields to display only clean column names (e.g., `ID`, `PURPOSE`, `EMAILS`) instead of raw JSON objects like `{"name":"ID","type":"INTEGER"}`.
+Fixed the `{ }` field picker dropdown in the Pulse Email step so it correctly displays only clean column names (e.g., `ID`, `PURPOSE`, `EMAILS`) instead of showing raw malformed JSON fragments.
 
 ## Root Cause
 
-The `last_known_columns` field in the `queries` table can store either plain strings or objects with `{name, type}` shape. The original implementation cast the array as `string[]` directly, which caused the raw JSON representation to appear in the dropdown when the data was stored as objects.
+The `last_known_columns` field in the `queries` table has two storage formats:
+
+1. **Clean**: `["COL_A", "COL_B"]` -- plain string array of column names
+2. **Corrupted fragments**: The JSON `[{"name":"ID","type":"INTEGER"},...]` was split on commas and stored as individual text array elements like `["[{\"name\":\"ID\"", "\"type\":\"INTEGER\"}", ...]`
+
+The original code assumed the data was always either plain strings or proper JSON objects. The corrupted fragment format caused the dropdown to display the raw broken text.
 
 ## Changes
 
 ### `src/pages/PulseBuilder/panels/EmailConfigPanel.tsx`
 
-- Updated the column parsing logic in the `recipientColumns` fetch effect to handle both formats:
-  - Plain strings pass through directly.
-  - Objects with a `name` property have the name extracted.
-- The dropdown now displays only the clean field names.
+- Rewrote the column parsing logic in the `recipientColumns` fetch effect to detect which format is present:
+  - If the first element starts with `[` or contains `"name"`, the fragments are rejoined with commas and parsed as JSON to extract `.name` values.
+  - If JSON parsing fails, a regex fallback extracts all `"name":"VALUE"` patterns.
+  - Otherwise, plain strings are used directly.
+- The dropdown now always shows clean column names regardless of storage format.
