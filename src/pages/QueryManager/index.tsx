@@ -1,13 +1,14 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
-import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus } from 'lucide-react';
+import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus, ScrollText } from 'lucide-react';
 import { useQueries } from '../../hooks/useQueries';
 import { useEndpoints } from '../../hooks/useEndpoints';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectsContext';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { useActiveDashboards } from '../../contexts/ActiveDashboardsContext';
+import { usePulses } from '../../hooks/usePulses';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
@@ -21,7 +22,7 @@ import ApiEndpointQueryForm from './ApiEndpointQueryForm';
 import NodalConnectQueryForm from './NodalConnectQueryForm';
 import ImportNodalModal from './ImportNodalModal';
 import FixedValuesModal from './FixedValuesModal';
-import type { Query, QueryType, QueryPurposeType, QueryAppTarget, QueryWithRelations, ApiEndpoint, UserParameter, RequestBodyFieldMapping } from '../../types/database';
+import type { Query, QueryType, QueryPurposeType, QueryAppTarget, QueryWithRelations, ApiEndpoint, UserParameter, RequestBodyFieldMapping, PulseCanvasData, PulseQueryStepConfig, PulseStepConfig } from '../../types/database';
 
 const QUERY_TYPE_CONFIG: Record<QueryType, { label: string; icon: typeof Globe; color: string }> = {
   api_endpoint: { label: 'API Endpoint', icon: Globe, color: 'bg-blue-100 text-blue-800' },
@@ -92,8 +93,21 @@ export default function QueryManager() {
   const [newFolderColor, setNewFolderColor] = useState('#3B82F6');
   const [dashboardCreatedId, setDashboardCreatedId] = useState<string | null>(null);
   const [dashboardCreatedData, setDashboardCreatedData] = useState<any>(null);
+
+  // Create Pulse modal state
+  const [showCreatePulse, setShowCreatePulse] = useState(false);
+  const [createPulseQueryId, setCreatePulseQueryId] = useState<string | null>(null);
+  const [createPulseQueryName, setCreatePulseQueryName] = useState('');
+  const [createPulseName, setCreatePulseName] = useState('');
+  const [createPulseFolderId, setCreatePulseFolderId] = useState('');
+  const [createPulseError, setCreatePulseError] = useState('');
+  const [creatingPulse, setCreatingPulse] = useState(false);
+  const [pulseCreatedId, setPulseCreatedId] = useState<string | null>(null);
+  const [pulseCreatedProjectId, setPulseCreatedProjectId] = useState<string | null>(null);
+
   const navigate = useNavigate();
-  const { openDashboard } = useActiveDashboards();
+  const { openDashboard, openPulseBuilder } = useActiveDashboards();
+  const { createPulse, updatePulse } = usePulses();
 
   const filteredQueries = useMemo(() => {
     let result = queries;
@@ -108,6 +122,11 @@ export default function QueryManager() {
 
   const dashboardFolders = useMemo(() =>
     projects.filter(p => p.type === 'dashboards'),
+    [projects]
+  );
+
+  const pulseFolders = useMemo(() =>
+    projects.filter(p => p.type === 'pulse'),
     [projects]
   );
 
@@ -212,6 +231,90 @@ export default function QueryManager() {
     setDashboardCreatedData(dashResult.data!);
   };
 
+  const handleCreatePulseSubmit = async () => {
+    const trimmedName = createPulseName.trim();
+    if (!trimmedName) {
+      setCreatePulseError('Pulse name is required');
+      return;
+    }
+    if (!createPulseFolderId) {
+      setCreatePulseError('Please select a folder');
+      return;
+    }
+
+    setCreatingPulse(true);
+    setCreatePulseError('');
+
+    const pulseResult = await createPulse(createPulseFolderId, trimmedName);
+    if (pulseResult.error) {
+      setCreatePulseError(pulseResult.error);
+      setCreatingPulse(false);
+      return;
+    }
+
+    const newPulseId = pulseResult.data!.id;
+
+    const triggerNode = {
+      id: 'trigger-1',
+      type: 'trigger' as const,
+      position: { x: 250, y: 50 },
+      data: { label: 'Schedule', configured: false, triggerType: 'scheduled' },
+      deletable: false,
+    };
+    const queryNode = {
+      id: 'query-1',
+      type: 'query' as const,
+      position: { x: 250, y: 200 },
+      data: { label: createPulseQueryName, stepName: createPulseQueryName, configured: true },
+    };
+    const edge = {
+      id: 'e-trigger-1-query-1',
+      source: 'trigger-1',
+      target: 'query-1',
+    };
+
+    const canvasData: PulseCanvasData = { nodes: [triggerNode, queryNode], edges: [edge] };
+    const stepConfigs: Record<string, PulseStepConfig> = {
+      'query-1': {
+        stepType: 'query',
+        name: createPulseQueryName,
+        stepName: createPulseQueryName,
+        queryId: createPulseQueryId!,
+        queryName: createPulseQueryName,
+        parameterValues: {},
+      } as PulseQueryStepConfig,
+    };
+
+    const { error: updateError } = await updatePulse(newPulseId, {
+      canvas_data: canvasData,
+      step_configs: stepConfigs,
+      workflow_version: 2,
+      trigger_type: 'scheduled',
+    });
+
+    if (updateError) {
+      setCreatePulseError(updateError);
+      setCreatingPulse(false);
+      return;
+    }
+
+    setCreatingPulse(false);
+    setPulseCreatedId(newPulseId);
+    setPulseCreatedProjectId(createPulseFolderId);
+  };
+
+  const handleCloseCreatePulse = () => {
+    setShowCreatePulse(false);
+    setCreatePulseQueryId(null);
+    setCreatePulseQueryName('');
+    setCreatePulseName('');
+    setCreatePulseFolderId('');
+    setCreatePulseError('');
+    setPulseCreatedId(null);
+    setPulseCreatedProjectId(null);
+    setCreatingPulse(false);
+  };
+
   const handleCreate = (type: QueryType) => {
     setSelectedType(type);
     setEditingQuery(null);
@@ -279,6 +382,19 @@ export default function QueryManager() {
       setNewFolderColor('#3B82F6');
       setDashboardCreatedId(null);
       setShowCreateDashboard(true);
+    }
+
+    // For new queries with app_target 'pulse', offer to create a pulse
+    if (!editingQuery && result?.data && (data.purpose_type === 'query' || !data.purpose_type) && data.app_target === 'pulse') {
+      const newQuery = result.data as Query;
+      setCreatePulseQueryId(newQuery.id);
+      setCreatePulseQueryName(newQuery.name);
+      setCreatePulseName(newQuery.name);
+      setCreatePulseFolderId(pulseFolders.length > 0 ? pulseFolders[0].id : '');
+      setCreatePulseError('');
+      setPulseCreatedId(null);
+      setPulseCreatedProjectId(null);
+      setShowCreatePulse(true);
     }
   };
 
@@ -1579,6 +1695,89 @@ export default function QueryManager() {
               <Button onClick={handleCreateDashboardSubmit} loading={creatingDashboard}>
                 <LayoutDashboard className="w-4 h-4" />
                 Create Dashboard
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Create Pulse Modal */}
+      <Modal
+        isOpen={showCreatePulse}
+        onClose={handleCloseCreatePulse}
+        title={pulseCreatedId ? 'Pulse Created' : 'Create Pulse from Query'}
+      >
+        {pulseCreatedId ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle className="w-5 h-5" />
+              <span className="font-medium">Pulse created successfully!</span>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Your pulse "{createPulseName}" has been created with a query step pre-configured.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={handleCloseCreatePulse}>
+                Close
+              </Button>
+              <Button onClick={() => {
+                handleCloseCreatePulse();
+                openPulseBuilder(pulseCreatedProjectId!, pulseCreatedId!);
+                navigate('/');
+              }}>
+                <ScrollText className="w-4 h-4" />
+                Open Pulse
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Would you like to create a Pulse for this query? The workflow will be pre-configured with a query step.
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Pulse Name
+              </label>
+              <input
+                type="text"
+                value={createPulseName}
+                onChange={(e) => setCreatePulseName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter pulse name..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Folder
+              </label>
+              {pulseFolders.length > 0 ? (
+                <CustomDropdown
+                  value={createPulseFolderId}
+                  onChange={(val) => setCreatePulseFolderId(val)}
+                  options={pulseFolders.map(f => ({ value: f.id, label: f.name }))}
+                  placeholder="Select a folder..."
+                />
+              ) : (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  No pulse folders found. Please create a folder in the Pulse section first.
+                </p>
+              )}
+            </div>
+
+            {createPulseError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{createPulseError}</p>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={handleCloseCreatePulse}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreatePulseSubmit} loading={creatingPulse}>
+                <ScrollText className="w-4 h-4" />
+                Create Pulse
               </Button>
             </div>
           </div>
