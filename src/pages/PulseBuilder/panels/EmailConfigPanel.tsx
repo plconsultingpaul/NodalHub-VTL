@@ -595,6 +595,7 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
     subject: '{pulse_name} - {date}',
     bodyType: 'plain',
     body: '',
+    onlySendIfResults: true,
     ...config,
   };
   const current: PulseEmailStepConfig = {
