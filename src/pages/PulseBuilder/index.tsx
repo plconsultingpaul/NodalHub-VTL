@@ -22,6 +22,7 @@ import type {
   PulseSchedule,
   PulseExecution,
   PulseStepConfig,
+  PulseQueryStepConfig,
 } from '../../types/database';
 
 const emptyPulseDraft = (companyId: string, projectId: string, userId: string): PulseInsert => ({
@@ -142,7 +143,17 @@ export default function PulseBuilder() {
           setCanvasEdges([]);
         }
         if (data.step_configs) {
-          setStepConfigs(data.step_configs as Record<string, PulseStepConfig>);
+          const loaded = data.step_configs as Record<string, PulseStepConfig>;
+          // Seed pulse-level run_mode/group_by_field into the first query step config
+          const queryKey = Object.keys(loaded).find(k => (loaded[k] as PulseQueryStepConfig).stepType === 'query');
+          if (queryKey && data.run_mode) {
+            const qc = loaded[queryKey] as PulseQueryStepConfig;
+            if (!qc.runMode) {
+              qc.runMode = data.run_mode as PulseQueryStepConfig['runMode'];
+              qc.groupByField = data.group_by_field ?? null;
+            }
+          }
+          setStepConfigs(loaded);
         } else {
           setStepConfigs({});
         }
@@ -343,6 +354,13 @@ export default function PulseBuilder() {
     const effectiveEdges = overrideCanvas?.edges ?? canvasEdges;
     const effectiveConfigs = overrideCanvas?.configs ?? stepConfigs;
 
+    // Sync run_mode from query step config
+    const queryStepCfg = Object.values(effectiveConfigs).find(
+      (c): c is PulseQueryStepConfig => c.stepType === 'query'
+    );
+    const derivedRunMode = queryStepCfg?.runMode || pulseDraft.run_mode || 'result_set';
+    const derivedGroupByField = queryStepCfg?.groupByField ?? pulseDraft.group_by_field ?? null;
+
     try {
       let pulseId = pulseBuilderPulseId;
 
@@ -361,8 +379,8 @@ export default function PulseBuilder() {
         await updatePulse(pulseId, {
           is_active: pulseDraft.is_active,
           query_id: pulseDraft.query_id,
-          run_mode: pulseDraft.run_mode,
-          group_by_field: pulseDraft.group_by_field,
+          run_mode: derivedRunMode,
+          group_by_field: derivedGroupByField,
           parameter_values: pulseDraft.parameter_values || {},
           trigger_type: pulseDraft.trigger_type || 'scheduled',
           input_variables: pulseDraft.input_variables || [],
@@ -377,8 +395,8 @@ export default function PulseBuilder() {
           description: pulseDraft.description,
           is_active: pulseDraft.is_active,
           query_id: pulseDraft.query_id,
-          run_mode: pulseDraft.run_mode,
-          group_by_field: pulseDraft.group_by_field,
+          run_mode: derivedRunMode,
+          group_by_field: derivedGroupByField,
           parameter_values: pulseDraft.parameter_values || {},
           trigger_type: pulseDraft.trigger_type || 'scheduled',
           input_variables: pulseDraft.input_variables || [],

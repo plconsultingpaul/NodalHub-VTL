@@ -1059,6 +1059,8 @@ export interface PulseQueryStepConfig {
   timeout?: number;
   retryCount?: number;
   onError?: 'stop' | 'continue';
+  runMode?: PulseRunMode;
+  groupByField?: string | null;
 }
 
 export interface PulseConditionStepConfig {

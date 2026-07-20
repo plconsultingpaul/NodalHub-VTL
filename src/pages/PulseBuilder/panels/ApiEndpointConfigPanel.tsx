@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { Database, Loader2, FunctionSquare } from 'lucide-react';
 import { useQueries } from '../../../hooks/useQueries';
 import { useFixedValues } from '../../../hooks/useFixedValues';
@@ -6,9 +6,10 @@ import { useLookupResolver } from '../../../hooks/useLookupResolver';
 import { useDateFunctions } from '../../../hooks/useDateFunctions';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { isDateFunctionRef, getDateFunctionId, makeDateFunctionRef, computeDateFunction } from '../../../lib/dateFunctions';
+import { supabase } from '../../../lib/supabase';
 import CustomDropdown from '../../../components/ui/CustomDropdown';
 import DatePicker from '../../../components/ui/DatePicker';
-import type { PulseQueryStepConfig, UserParameter, FixedValueListItem, PulseInputVariable } from '../../../types/database';
+import type { PulseQueryStepConfig, PulseRunMode, UserParameter, FixedValueListItem, PulseInputVariable } from '../../../types/database';
 
 interface ApiEndpointConfigPanelProps {
   config: PulseQueryStepConfig | null;
@@ -92,6 +93,34 @@ export default function ApiEndpointConfigPanel({ config, onChange, inputVariable
     queryId: undefined,
     parameterValues: {},
   };
+
+  const [queryColumns, setQueryColumns] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!current.queryId) { setQueryColumns([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('queries')
+        .select('last_known_columns')
+        .eq('id', current.queryId!)
+        .maybeSingle();
+      if (!data?.last_known_columns) { setQueryColumns([]); return; }
+      const raw = data.last_known_columns as string[];
+      if (raw.length === 0) { setQueryColumns([]); return; }
+      const firstEl = raw[0];
+      if (firstEl.startsWith('[') || firstEl.includes('"name"')) {
+        try {
+          const parsed = JSON.parse(raw.join(',')) as { name: string }[];
+          setQueryColumns(parsed.map(p => p.name).filter(Boolean));
+        } catch {
+          const matches = raw.join(',').matchAll(/"name"\s*:\s*"([^"]+)"/g);
+          setQueryColumns(Array.from(matches, m => m[1]));
+        }
+      } else {
+        setQueryColumns(raw);
+      }
+    })();
+  }, [current.queryId]);
 
   const selectedQuery = useMemo(() => {
     if (!current.queryId) return null;
@@ -318,6 +347,65 @@ export default function ApiEndpointConfigPanel({ config, onChange, inputVariable
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
           Dot-path to extract nested data from the response
         </p>
+      </div>
+
+      {/* Processing Mode */}
+      <div>
+        <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wider">
+          Processing Mode
+        </label>
+        <div className="space-y-1.5">
+          {([
+            { value: 'result_set', label: 'Per Result Set', desc: 'Process the entire result as a single dataset' },
+            { value: 'per_row', label: 'Per Row', desc: 'Run downstream steps once for each row returned' },
+            { value: 'per_group', label: 'Per Group', desc: 'Group rows by a field, then run once per group' },
+          ] as { value: PulseRunMode; label: string; desc: string }[]).map((mode) => (
+            <label
+              key={mode.value}
+              className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-colors ${
+                (current.runMode || 'result_set') === mode.value
+                  ? 'border-gray-900 bg-gray-50 dark:border-white dark:bg-gray-700'
+                  : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+              }`}
+            >
+              <input
+                type="radio"
+                name="runMode"
+                value={mode.value}
+                checked={(current.runMode || 'result_set') === mode.value}
+                onChange={() => onChange({ ...current, runMode: mode.value, ...(mode.value !== 'per_group' ? { groupByField: null } : {}) })}
+                className="mt-0.5 accent-gray-900 dark:accent-white"
+              />
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-900 dark:text-white">{mode.label}</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">{mode.desc}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+        {(current.runMode || 'result_set') === 'per_group' && (
+          <div className="mt-2">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wider">
+              Group By Field <span className="text-red-500">*</span>
+            </label>
+            {queryColumns.length > 0 ? (
+              <CustomDropdown
+                value={current.groupByField || ''}
+                onChange={(val) => onChange({ ...current, groupByField: val || null })}
+                options={queryColumns.map(c => ({ value: c, label: c }))}
+                placeholder="Select a column..."
+              />
+            ) : (
+              <input
+                type="text"
+                value={current.groupByField || ''}
+                onChange={(e) => onChange({ ...current, groupByField: e.target.value || null })}
+                placeholder="Enter column name (run a test to get suggestions)"
+                className="w-full px-2 py-1.5 text-xs bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-gray-900 dark:text-white"
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Error Handling */}

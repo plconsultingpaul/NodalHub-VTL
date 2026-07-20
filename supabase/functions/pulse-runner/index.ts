@@ -1276,17 +1276,28 @@ Deno.serve(async (req: Request) => {
     console.log("[pulse-runner] emailProvider configured:", !!emailProvider);
 
     const today = new Date().toISOString().slice(0, 10);
-    const runMode = pulse.run_mode || "result_set";
+
+    // Derive runMode from step_configs (query node) or fall back to pulse-level field
+    let runMode = pulse.run_mode || "result_set";
+    let groupByField = pulse.group_by_field;
+    if (pulse.step_configs) {
+      const configs = pulse.step_configs as Record<string, { stepType: string; runMode?: string; groupByField?: string | null }>;
+      const qCfg = Object.values(configs).find(c => c.stepType === "query");
+      if (qCfg?.runMode) {
+        runMode = qCfg.runMode;
+        groupByField = qCfg.groupByField ?? groupByField;
+      }
+    }
 
     type Iter = { groupValue: string; rows: Record<string, unknown>[] };
     let iterations: Iter[] = [];
     if (runMode === "per_row") {
       iterations = allRows.map((r, i) => ({
-        groupValue: String((r as Record<string, unknown>)[pulse.group_by_field || ""] ?? `row-${i + 1}`),
+        groupValue: String((r as Record<string, unknown>)[groupByField || ""] ?? `row-${i + 1}`),
         rows: [r],
       }));
     } else if (runMode === "per_group") {
-      const field = pulse.group_by_field;
+      const field = groupByField;
       if (!field) throw new Error("Per-group run mode requires group_by_field");
       const grouped = new Map<string, Record<string, unknown>[]>();
       for (const r of allRows) {
