@@ -267,8 +267,8 @@ export default function QueryManager() {
     setShowModal(false);
     setEditingQuery(null);
 
-    // For new queries with purpose_type 'query', offer to create a dashboard
-    if (!editingQuery && result?.data && (data.purpose_type === 'query' || !data.purpose_type)) {
+    // For new queries with purpose_type 'query', offer to create a dashboard (skip for pulse-targeted queries)
+    if (!editingQuery && result?.data && (data.purpose_type === 'query' || !data.purpose_type) && data.app_target !== 'pulse') {
       const newQuery = result.data as Query;
       setCreateDashboardQueryId(newQuery.id);
       setCreateDashboardName(newQuery.name);
