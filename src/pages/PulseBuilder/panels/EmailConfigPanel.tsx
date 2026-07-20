@@ -675,31 +675,40 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
     return node?.queryId || null;
   })();
 
+  const upstreamQueryIds = (upstreamNodes || [])
+    .map(n => n.queryId)
+    .filter((id): id is string => !!id);
+
   useEffect(() => {
-    if (!dataSourceQueryId) { setRecipientColumns([]); return; }
+    if (upstreamQueryIds.length === 0) { setRecipientColumns([]); return; }
     (async () => {
-      const { data: query } = await supabase
-        .from('queries')
-        .select('last_known_columns, api_endpoints(id)')
-        .eq('id', dataSourceQueryId)
-        .maybeSingle();
-      if (!query) { setRecipientColumns([]); return; }
-      const lastKnown = (query.last_known_columns || []) as string[];
-      if (lastKnown.length > 0) { setRecipientColumns(lastKnown); return; }
-      const ep = query.api_endpoints as { id: string } | null;
-      if (ep) {
-        const { data: fields } = await supabase
-          .from('api_endpoint_fields')
-          .select('field_name')
-          .eq('endpoint_id', ep.id)
-          .eq('field_type', 'response')
-          .order('field_name');
-        setRecipientColumns((fields || []).map(f => f.field_name));
-      } else {
-        setRecipientColumns([]);
+      const allCols: string[] = [];
+      for (const qId of upstreamQueryIds) {
+        const { data: query } = await supabase
+          .from('queries')
+          .select('last_known_columns, api_endpoints(id)')
+          .eq('id', qId)
+          .maybeSingle();
+        if (!query) continue;
+        const lastKnown = (query.last_known_columns || []) as string[];
+        if (lastKnown.length > 0) {
+          for (const c of lastKnown) { if (!allCols.includes(c)) allCols.push(c); }
+          continue;
+        }
+        const ep = query.api_endpoints as { id: string } | null;
+        if (ep) {
+          const { data: fields } = await supabase
+            .from('api_endpoint_fields')
+            .select('field_name')
+            .eq('endpoint_id', ep.id)
+            .eq('field_type', 'response')
+            .order('field_name');
+          for (const f of (fields || [])) { if (!allCols.includes(f.field_name)) allCols.push(f.field_name); }
+        }
       }
+      setRecipientColumns(allCols);
     })();
-  }, [dataSourceQueryId]);
+  }, [upstreamQueryIds.join(',')])
 
   const resultsTableColumns = current.resultsTableColumns || [];
   const hasResultsTable = resultsTableColumns.length > 0 || current.body?.includes('{results_table}');
