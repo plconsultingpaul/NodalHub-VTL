@@ -455,13 +455,13 @@ export default function Sidebar() {
                       <div key={pulse.id} className="flex items-center group">
                         <button
                           onClick={() => handlePulseEdit(pulse)}
-                          className={`flex items-center gap-2 flex-1 px-3 py-0.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
+                          className={`flex items-center gap-2 flex-1 min-w-0 px-3 py-0.5 rounded-lg text-sm cursor-pointer transition-all duration-200 ${
                             isActive
                               ? (isLight ? 'sidebar-active-glow-light text-blue-700' : 'sidebar-active-glow text-white')
                               : (isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-300 hover:text-white')
                           }`}
                         >
-                          <span className="truncate flex-1 text-left">{pulse.name}</span>
+                          <span className="truncate flex-1 text-left" title={pulse.name}>{pulse.name}</span>
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${pulse.is_active ? 'bg-green-400' : 'bg-red-400'}`} />
                         </button>
                         <Dropdown
