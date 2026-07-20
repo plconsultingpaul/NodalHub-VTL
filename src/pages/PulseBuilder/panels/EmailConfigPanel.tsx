@@ -690,7 +690,8 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
           .eq('id', qId)
           .maybeSingle();
         if (!query) continue;
-        const lastKnown = (query.last_known_columns || []) as string[];
+        const rawCols = (query.last_known_columns || []) as (string | { name: string })[];
+        const lastKnown = rawCols.map(c => typeof c === 'string' ? c : c.name).filter(Boolean);
         if (lastKnown.length > 0) {
           for (const c of lastKnown) { if (!allCols.includes(c)) allCols.push(c); }
           continue;
