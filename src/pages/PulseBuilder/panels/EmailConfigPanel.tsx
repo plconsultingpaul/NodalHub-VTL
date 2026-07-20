@@ -113,17 +113,21 @@ function CompactChipsInput({
   onChange,
   teamMembers,
   contacts,
+  availableColumns,
 }: {
   label: string;
   values: string[];
   onChange: (values: string[]) => void;
   teamMembers: TeamMember[];
   contacts: ContactEntry[];
+  availableColumns?: string[];
 }) {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+  const [showFieldPicker, setShowFieldPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const fieldPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!showPicker) return;
@@ -136,14 +140,35 @@ function CompactChipsInput({
     return () => document.removeEventListener('mousedown', handler);
   }, [showPicker]);
 
+  useEffect(() => {
+    if (!showFieldPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (fieldPickerRef.current && !fieldPickerRef.current.contains(e.target as Node)) {
+        setShowFieldPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showFieldPicker]);
+
+  const isFieldToken = (val: string) => /^\{\{.+\}\}$/.test(val.trim());
+
   const commit = () => {
     const trimmed = draft.trim().replace(/,$/, '');
     if (!trimmed) { setDraft(''); return; }
-    if (!isValidEmail(trimmed)) { setError('Invalid email'); return; }
+    if (!isFieldToken(trimmed) && !isValidEmail(trimmed)) { setError('Invalid email'); return; }
     if (values.includes(trimmed)) { setDraft(''); return; }
     onChange([...values, trimmed]);
     setDraft('');
     setError(null);
+  };
+
+  const insertField = (col: string) => {
+    const token = `{{${col}}}`;
+    if (!values.includes(token)) {
+      onChange([...values, token]);
+    }
+    setShowFieldPicker(false);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -167,14 +192,44 @@ function CompactChipsInput({
     <div>
       <div className="flex items-center justify-between mb-0.5">
         <label className="text-[10px] font-medium text-gray-600 dark:text-gray-400">{label}</label>
-        <div className="relative" ref={pickerRef}>
-          <button
-            type="button"
-            onClick={() => setShowPicker(!showPicker)}
-            className="p-0.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded transition-colors"
-          >
-            <Users className="w-3 h-3" />
-          </button>
+        <div className="flex items-center gap-0.5">
+          {availableColumns && availableColumns.length > 0 && (
+            <div className="relative" ref={fieldPickerRef}>
+              <button
+                type="button"
+                onClick={() => setShowFieldPicker(!showFieldPicker)}
+                className="p-0.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors"
+                title="Insert query field"
+              >
+                <Braces className="w-3 h-3" />
+              </button>
+              {showFieldPicker && (
+                <div className="absolute right-0 top-full mt-1 w-52 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50">
+                  <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700">
+                    <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Query Field</p>
+                  </div>
+                  {availableColumns.map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => insertField(col)}
+                      className="w-full text-left px-2 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 text-[11px] font-mono text-gray-800 dark:text-gray-200 truncate"
+                    >
+                      {col}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="relative" ref={pickerRef}>
+            <button
+              type="button"
+              onClick={() => setShowPicker(!showPicker)}
+              className="p-0.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded transition-colors"
+            >
+              <Users className="w-3 h-3" />
+            </button>
           {showPicker && (
             <div className="absolute right-0 top-full mt-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50">
               {teamMembers.length === 0 && contacts.length === 0 ? (
@@ -212,19 +267,27 @@ function CompactChipsInput({
               )}
             </div>
           )}
+          </div>
         </div>
       </div>
       <div className={`flex flex-wrap items-center gap-1 min-h-[28px] px-1.5 py-1 border rounded-md bg-white dark:bg-gray-700 ${
         error ? 'border-red-400' : 'border-gray-300 dark:border-gray-600'
       }`}>
-        {values.map(email => (
-          <span key={email} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-600 rounded text-[10px] text-gray-800 dark:text-gray-100">
-            {email}
-            <button type="button" onClick={() => onChange(values.filter(v => v !== email))} className="hover:text-red-600">
-              <X className="w-2.5 h-2.5" />
-            </button>
-          </span>
-        ))}
+        {values.map(email => {
+          const isToken = /^\{\{.+\}\}$/.test(email);
+          return (
+            <span key={email} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${
+              isToken
+                ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-mono'
+                : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-100'
+            }`}>
+              {email}
+              <button type="button" onClick={() => onChange(values.filter(v => v !== email))} className="hover:text-red-600">
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          );
+        })}
         <input
           type="text"
           value={draft}
@@ -585,6 +648,7 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
   const [showCc, setShowCc] = useState(!!config?.ccRecipients?.length);
   const [showBcc, setShowBcc] = useState(!!config?.bccRecipients?.length);
   const [showTableModal, setShowTableModal] = useState(false);
+  const [recipientColumns, setRecipientColumns] = useState<string[]>([]);
   const subjectRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -610,6 +674,32 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
     const node = upstreamNodes.find(n => n.id === current.dataSource);
     return node?.queryId || null;
   })();
+
+  useEffect(() => {
+    if (!dataSourceQueryId) { setRecipientColumns([]); return; }
+    (async () => {
+      const { data: query } = await supabase
+        .from('queries')
+        .select('last_known_columns, api_endpoints(id)')
+        .eq('id', dataSourceQueryId)
+        .maybeSingle();
+      if (!query) { setRecipientColumns([]); return; }
+      const lastKnown = (query.last_known_columns || []) as string[];
+      if (lastKnown.length > 0) { setRecipientColumns(lastKnown); return; }
+      const ep = query.api_endpoints as { id: string } | null;
+      if (ep) {
+        const { data: fields } = await supabase
+          .from('api_endpoint_fields')
+          .select('field_name')
+          .eq('endpoint_id', ep.id)
+          .eq('field_type', 'response')
+          .order('field_name');
+        setRecipientColumns((fields || []).map(f => f.field_name));
+      } else {
+        setRecipientColumns([]);
+      }
+    })();
+  }, [dataSourceQueryId]);
 
   const resultsTableColumns = current.resultsTableColumns || [];
   const hasResultsTable = resultsTableColumns.length > 0 || current.body?.includes('{results_table}');
@@ -721,6 +811,7 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
           onChange={(vals) => emit({ toRecipients: vals })}
           teamMembers={teamMembers}
           contacts={contacts}
+          availableColumns={recipientColumns}
         />
 
         {showCc && (
@@ -730,6 +821,7 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
             onChange={(vals) => emit({ ccRecipients: vals })}
             teamMembers={teamMembers}
             contacts={contacts}
+            availableColumns={recipientColumns}
           />
         )}
 
@@ -740,6 +832,7 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
             onChange={(vals) => emit({ bccRecipients: vals })}
             teamMembers={teamMembers}
             contacts={contacts}
+            availableColumns={recipientColumns}
           />
         )}
       </div>

@@ -979,8 +979,32 @@ Deno.serve(async (req: Request) => {
             const sourceData = dataSourceVar ? context[dataSourceVar] : null;
             const rows = sourceData ? flattenRows(sourceData) : [];
 
+            // Resolve {{column}} tokens in recipient lists
+            const resolveRecipientTokens = (recipients: string[]): string[] => {
+              const resolved: string[] = [];
+              for (const entry of recipients) {
+                const match = entry.trim().match(/^\{\{(.+)\}\}$/);
+                if (match && rows.length > 0) {
+                  const colName = match[1];
+                  for (const row of rows) {
+                    const val = row[colName];
+                    if (typeof val === "string" && val.includes("@") && !resolved.includes(val)) {
+                      resolved.push(val);
+                    }
+                  }
+                } else if (!entry.trim().match(/^\{\{.+\}\}$/)) {
+                  if (!resolved.includes(entry)) resolved.push(entry);
+                }
+              }
+              return resolved;
+            };
+
+            const resolvedTo = resolveRecipientTokens(toRecipients);
+            const resolvedCc = resolveRecipientTokens(ccRecipients);
+            const resolvedBcc = resolveRecipientTokens(bccRecipients);
+
             if (onlySendIfResults && dataSourceVar && rows.length === 0) {
-              stepResults.push({ nodeId, name: stepName, type: "email", status: "skipped", reason: "no_results", inputs: { to: toRecipients, subject, dataSource: dataSourceVar }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+              stepResults.push({ nodeId, name: stepName, type: "email", status: "skipped", reason: "no_results", inputs: { to: resolvedTo, subject, dataSource: dataSourceVar }, startedAt: stepStart, finishedAt: new Date().toISOString() });
             } else {
               // Get email provider
               const { data: emailProviders } = await admin
@@ -1045,9 +1069,9 @@ Deno.serve(async (req: Request) => {
               const sendArgs: SendEmailArgs = {
                 fromEmail: provider.send_from_email,
                 token: emailToken,
-                to: toRecipients,
-                cc: ccRecipients,
-                bcc: bccRecipients,
+                to: resolvedTo,
+                cc: resolvedCc,
+                bcc: resolvedBcc,
                 subject: finalSubject,
                 body: useHtml && bodyType !== "html" ? finalBody.replace(/\n/g, "<br>") : finalBody,
                 isHtml: useHtml,
@@ -1060,7 +1084,7 @@ Deno.serve(async (req: Request) => {
                 await sendO365Email(sendArgs);
               }
 
-              stepResults.push({ nodeId, name: stepName, type: "email", status: "success", recipientCount: toRecipients.length + ccRecipients.length + bccRecipients.length, inputs: { to: toRecipients, cc: ccRecipients, bcc: bccRecipients, subject: finalSubject, dataSource: dataSourceVar }, outputs: { recipientCount: toRecipients.length + ccRecipients.length + bccRecipients.length, hasAttachment: !!attachment }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+              stepResults.push({ nodeId, name: stepName, type: "email", status: "success", recipientCount: resolvedTo.length + resolvedCc.length + resolvedBcc.length, inputs: { to: resolvedTo, cc: resolvedCc, bcc: resolvedBcc, subject: finalSubject, dataSource: dataSourceVar }, outputs: { recipientCount: resolvedTo.length + resolvedCc.length + resolvedBcc.length, hasAttachment: !!attachment }, startedAt: stepStart, finishedAt: new Date().toISOString() });
             }
 
             // Follow edges
