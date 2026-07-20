@@ -107,6 +107,83 @@ function VariableInsertButton({
   );
 }
 
+function ColumnInsertButton({
+  columns,
+  targetRef,
+  onInsert,
+}: {
+  columns: string[];
+  targetRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
+  onInsert: (newValue: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const insertColumn = (colName: string) => {
+    const el = targetRef.current;
+    const token = `{${colName}}`;
+    if (el) {
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? start;
+      const before = el.value.slice(0, start);
+      const after = el.value.slice(end);
+      const newVal = before + token + after;
+      onInsert(newVal);
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = start + token.length;
+        el.setSelectionRange(pos, pos);
+      });
+    } else {
+      onInsert((targetRef.current?.value || '') + token);
+    }
+    setOpen(false);
+  };
+
+  if (!columns.length) return null;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded transition-colors"
+        title="Insert query column"
+      >
+        <Braces className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-52 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50">
+          <div className="px-2 py-1.5 border-b border-gray-100 dark:border-gray-700">
+            <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Insert Column</p>
+          </div>
+          {columns.map((col) => (
+            <button
+              key={col}
+              type="button"
+              onClick={() => insertColumn(col)}
+              className="w-full text-left px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+            >
+              <span className="text-[11px] font-mono text-blue-700 dark:text-blue-300">{`{${col}}`}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompactChipsInput({
   label,
   values,
@@ -869,13 +946,22 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
           <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Subject
           </label>
-          {inputVariables && inputVariables.length > 0 && (
-            <VariableInsertButton
-              variables={inputVariables}
-              targetRef={subjectRef}
-              onInsert={(val) => emit({ subject: val })}
-            />
-          )}
+          <div className="flex items-center gap-0.5">
+            {recipientColumns.length > 0 && (
+              <ColumnInsertButton
+                columns={recipientColumns}
+                targetRef={subjectRef}
+                onInsert={(val) => emit({ subject: val })}
+              />
+            )}
+            {inputVariables && inputVariables.length > 0 && (
+              <VariableInsertButton
+                variables={inputVariables}
+                targetRef={subjectRef}
+                onInsert={(val) => emit({ subject: val })}
+              />
+            )}
+          </div>
         </div>
         <input
           ref={subjectRef}
@@ -895,6 +981,13 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
             Body
           </label>
           <div className="flex items-center gap-1">
+            {recipientColumns.length > 0 && (
+              <ColumnInsertButton
+                columns={recipientColumns}
+                targetRef={bodyRef}
+                onInsert={(val) => emit({ body: val })}
+              />
+            )}
             {inputVariables && inputVariables.length > 0 && (
               <VariableInsertButton
                 variables={inputVariables}
