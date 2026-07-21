@@ -1362,6 +1362,8 @@ export interface DrilldownFormattingRules {
   grid?: GridColumnFormatting;
   columns?: Record<string, GridColumnFormatting>;
   conditionalFormatting?: ConditionalFormatting[];
+  columnOrder?: string[];
+  hiddenColumns?: string[];
 }
 
 export interface GridCellFormattingRules {
