@@ -131,8 +131,12 @@ export default function GridFormattingModal({
   const [columnOrder, setColumnOrder] = useState<string[]>(columns);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<string[]>([]);
+  const [drilldownColumnOrders, setDrilldownColumnOrders] = useState<Record<string, string[]>>({});
+  const [drilldownHiddenColumns, setDrilldownHiddenColumns] = useState<Record<string, string[]>>({});
   const dragItemRef = useRef<number | null>(null);
   const dragOverItemRef = useRef<number | null>(null);
+  const drilldownDragItemRef = useRef<number | null>(null);
+  const drilldownDragOverItemRef = useRef<number | null>(null);
   const prevIsOpenRef = useRef(false);
 
   useEffect(() => {
@@ -148,6 +152,18 @@ export default function GridFormattingModal({
       setColumnOrder(stillExisting.length > 0 ? [...stillExisting, ...newColumns] : columns);
       setHiddenColumns(initialRules.hiddenColumns || []);
       setGroupBy(initialRules.groupBy || []);
+      // Initialize drilldown column orders
+      const ddOrders: Record<string, string[]> = {};
+      const ddHidden: Record<string, string[]> = {};
+      drilldowns.forEach(dd => {
+        const savedDdOrder = initialRules.drilldowns?.[dd.id]?.columnOrder || [];
+        const ddStillExisting = savedDdOrder.filter(c => dd.columns.includes(c));
+        const ddNewCols = dd.columns.filter(c => !savedDdOrder.includes(c));
+        ddOrders[dd.id] = ddStillExisting.length > 0 ? [...ddStillExisting, ...ddNewCols] : dd.columns;
+        ddHidden[dd.id] = initialRules.drilldowns?.[dd.id]?.hiddenColumns || [];
+      });
+      setDrilldownColumnOrders(ddOrders);
+      setDrilldownHiddenColumns(ddHidden);
     }
     prevIsOpenRef.current = isOpen;
   }, [isOpen, initialRules, drilldowns, columns]);
@@ -261,11 +277,24 @@ export default function GridFormattingModal({
   };
 
   const handleSave = () => {
+    const mergedDrilldowns = { ...(formattingRules.drilldowns || {}) };
+    drilldowns.forEach(dd => {
+      const order = drilldownColumnOrders[dd.id];
+      const hidden = drilldownHiddenColumns[dd.id];
+      if (order || hidden) {
+        mergedDrilldowns[dd.id] = {
+          ...(mergedDrilldowns[dd.id] || {}),
+          columnOrder: order && order.length > 0 ? order : undefined,
+          hiddenColumns: hidden && hidden.length > 0 ? hidden : undefined,
+        };
+      }
+    });
     const rulesToSave: GridCellFormattingRules = {
       ...formattingRules,
       columnOrder,
       hiddenColumns: hiddenColumns.length > 0 ? hiddenColumns : undefined,
-      groupBy: groupBy.length > 0 ? groupBy : undefined
+      groupBy: groupBy.length > 0 ? groupBy : undefined,
+      drilldowns: Object.keys(mergedDrilldowns).length > 0 ? mergedDrilldowns : undefined,
     };
     onSave(rulesToSave);
     onClose();
@@ -982,6 +1011,94 @@ export default function GridFormattingModal({
                 ))}
               </select>
             </div>
+
+            {/* Drilldown Column Order Sections */}
+            {drilldowns.length > 0 && (
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Drilldown Column Order</h4>
+                {drilldowns.map(dd => {
+                  const ddOrder = drilldownColumnOrders[dd.id] || dd.columns;
+                  const ddHidden = drilldownHiddenColumns[dd.id] || [];
+                  const isExpanded = expandedDrilldowns[dd.id] ?? false;
+                  return (
+                    <div key={dd.id} className="mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedDrilldowns(prev => ({ ...prev, [dd.id]: !prev[dd.id] }))}
+                        className="flex items-center gap-2 w-full text-left px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors"
+                      >
+                        {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{dd.displayName}</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">{ddOrder.length} columns</span>
+                      </button>
+                      {isExpanded && (
+                        <div className="mt-2 ml-2 space-y-1">
+                          <div className="flex justify-end mb-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setDrilldownColumnOrders(prev => ({ ...prev, [dd.id]: dd.columns }));
+                                setDrilldownHiddenColumns(prev => ({ ...prev, [dd.id]: [] }));
+                              }}
+                            >
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                              Reset
+                            </Button>
+                          </div>
+                          {ddOrder.map((col, index) => {
+                            const isHidden = ddHidden.includes(col);
+                            return (
+                              <div
+                                key={col}
+                                draggable
+                                onDragStart={() => { drilldownDragItemRef.current = index; }}
+                                onDragEnter={() => { drilldownDragOverItemRef.current = index; }}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDragEnd={() => {
+                                  if (drilldownDragItemRef.current === null || drilldownDragOverItemRef.current === null) return;
+                                  const reordered = [...ddOrder];
+                                  const [removed] = reordered.splice(drilldownDragItemRef.current, 1);
+                                  reordered.splice(drilldownDragOverItemRef.current, 0, removed);
+                                  setDrilldownColumnOrders(prev => ({ ...prev, [dd.id]: reordered }));
+                                  drilldownDragItemRef.current = null;
+                                  drilldownDragOverItemRef.current = null;
+                                }}
+                                className={`flex items-center gap-3 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md cursor-grab active:cursor-grabbing hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm transition-all select-none ${isHidden ? 'opacity-50' : ''}`}
+                              >
+                                <GripVertical className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+                                <span className="text-sm font-medium text-gray-500 dark:text-gray-400 w-6 text-right">
+                                  {index + 1}
+                                </span>
+                                <span className={`text-sm flex-1 ${isHidden ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
+                                  {formatColumnName(col)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDrilldownHiddenColumns(prev => ({
+                                      ...prev,
+                                      [dd.id]: prev[dd.id]?.includes(col)
+                                        ? prev[dd.id].filter(c => c !== col)
+                                        : [...(prev[dd.id] || []), col]
+                                    }));
+                                  }}
+                                  className={`p-1 rounded transition-colors ${isHidden ? 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300' : 'text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300'}`}
+                                  title={isHidden ? 'Show column' : 'Hide column'}
+                                >
+                                  {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
