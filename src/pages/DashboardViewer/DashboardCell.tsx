@@ -1110,9 +1110,21 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           return posA - posB;
         });
 
+        // Apply drilldown column order and hidden columns from formatting rules
+        const drilldownFormatting = formattingRulesRef.current.drilldowns?.[drilldown.id];
+        const ddColumnOrder = drilldownFormatting?.columnOrder;
+        const ddHiddenCols = drilldownFormatting?.hiddenColumns || [];
+
+        let orderedKeys = sortedKeys;
+        if (ddColumnOrder && ddColumnOrder.length > 0) {
+          const inOrder = ddColumnOrder.filter(c => sortedKeys.includes(c));
+          const notInOrder = sortedKeys.filter(c => !ddColumnOrder.includes(c));
+          orderedKeys = [...inOrder, ...notInOrder];
+        }
+        const visibleKeys = orderedKeys.filter(k => !ddHiddenCols.includes(k));
+
         onDrilldownColumnsDetectedRef.current?.(drilldown.id, sortedKeys);
 
-        const drilldownFormatting = formattingRulesRef.current.drilldowns?.[drilldown.id];
         const drilldownGridFormatting = drilldownFormatting?.grid || {};
         const drilldownColumnFormattings = drilldownFormatting?.columns || {};
 
@@ -1171,7 +1183,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           };
         };
 
-        const columns: Tabulator.ColumnDefinition[] = sortedKeys.map(key => {
+        const columns: Tabulator.ColumnDefinition[] = visibleKeys.map(key => {
           const tc = templateMap.get(key);
           const hasSavedWidth = tc?.width && tc.width > 0;
 
