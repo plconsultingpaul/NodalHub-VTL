@@ -50,7 +50,7 @@ export default function QueryManager() {
   const { queries, loading, createQuery, updateQuery, deleteQuery } = useQueries();
   const { endpoints, nodalDatabases } = useEndpoints();
   const { activeCompany, user } = useAuth();
-  const { projects, createProject, createDashboard } = useProjects();
+  const { projects, createProject, createDashboard, refetch: refetchProjects } = useProjects();
   const { fixedValues, getResolvedValue } = useFixedValues();
   const { resolveLookup, getLookupState } = useLookupResolver();
 
@@ -301,6 +301,7 @@ export default function QueryManager() {
     setCreatingPulse(false);
     setPulseCreatedId(newPulseId);
     setPulseCreatedProjectId(createPulseFolderId);
+    await refetchProjects();
   };
 
   const handleCloseCreatePulse = () => {
