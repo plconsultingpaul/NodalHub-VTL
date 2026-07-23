@@ -23,14 +23,31 @@ interface QueryParameter {
 
 const flattenRows = (data: unknown): Record<string, unknown>[] => {
   if (Array.isArray(data)) {
-    return data.filter((r) => r && typeof r === "object") as Record<string, unknown>[];
+    return data.filter((r) => r && typeof r === "object" && !Array.isArray(r)) as Record<string, unknown>[];
   }
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
+
+    // Detect columns+data pattern (Nodal Connect / SQL response format)
+    if (Array.isArray(obj.columns) && Array.isArray(obj.data)) {
+      const columns = obj.columns as Array<{ name: string }>;
+      const dataArr = obj.data as unknown[][];
+      if (columns.length > 0 && columns[0]?.name) {
+        console.log("[pulse-runner] flattenRows: detected columns+data pattern, columns:", columns.length, "rows:", dataArr.length);
+        return dataArr.map((row) => {
+          const rowObj: Record<string, unknown> = {};
+          columns.forEach((col, i) => {
+            rowObj[col.name] = Array.isArray(row) ? row[i] : undefined;
+          });
+          return rowObj;
+        });
+      }
+    }
+
     for (const key of Object.keys(obj)) {
       const val = obj[key];
-      if (Array.isArray(val) && val.length > 0 && val[0] && typeof val[0] === "object") {
-        return val.filter((r) => r && typeof r === "object") as Record<string, unknown>[];
+      if (Array.isArray(val) && val.length > 0 && val[0] && typeof val[0] === "object" && !Array.isArray(val[0])) {
+        return val.filter((r) => r && typeof r === "object" && !Array.isArray(r)) as Record<string, unknown>[];
       }
     }
     // Fallback: check for any array property even if empty
@@ -977,7 +994,12 @@ Deno.serve(async (req: Request) => {
 
             // Get data from context for attachment
             const sourceData = dataSourceVar ? context[dataSourceVar] : null;
+            console.log("[pulse-runner] Email step - dataSource:", dataSourceVar, "sourceData type:", typeof sourceData, "isArray:", Array.isArray(sourceData));
+            if (sourceData && typeof sourceData === "object" && !Array.isArray(sourceData)) {
+              console.log("[pulse-runner] Email step - sourceData keys:", Object.keys(sourceData as Record<string, unknown>));
+            }
             const rows = sourceData ? flattenRows(sourceData) : [];
+            console.log("[pulse-runner] Email step - flattenRows returned:", rows.length, "rows, first row keys:", rows[0] ? Object.keys(rows[0]) : "N/A");
 
             // Resolve {{column}} tokens in recipient lists
             const resolveRecipientTokens = (recipients: string[]): string[] => {
