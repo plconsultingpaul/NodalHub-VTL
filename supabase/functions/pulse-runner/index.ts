@@ -60,6 +60,30 @@ const flattenRows = (data: unknown): Record<string, unknown>[] => {
   return [];
 };
 
+const sanitizeTableColumns = (cols: string[] | null, rowKeys: string[]): string[] | null => {
+  if (!cols || cols.length === 0) return cols;
+  const looksCorrupted = cols.some((c) => c.includes('"name"') || c.startsWith('[{') || c.startsWith('{"'));
+  if (!looksCorrupted) return cols;
+  try {
+    const joined = cols.join(',');
+    const cleaned = joined.startsWith('[') ? joined : `[${joined}]`;
+    const parsed = JSON.parse(cleaned) as { name: string }[];
+    const names = parsed.map((p) => p.name).filter(Boolean);
+    if (names.length > 0) {
+      console.log("[pulse-runner] sanitizeTableColumns: extracted names from corrupted config:", names);
+      return names;
+    }
+  } catch { /* fallthrough */ }
+  const nameMatches = cols.join(',').match(/"name"\s*:\s*"([^"]+)"/g) || [];
+  const extracted = nameMatches.map((m) => m.replace(/"name"\s*:\s*"/, '').replace(/"$/, '')).filter(Boolean);
+  if (extracted.length > 0) {
+    console.log("[pulse-runner] sanitizeTableColumns: regex-extracted names:", extracted);
+    return extracted;
+  }
+  console.log("[pulse-runner] sanitizeTableColumns: could not parse corrupted columns, falling back to row keys");
+  return rowKeys.length > 0 ? rowKeys : null;
+};
+
 const resolveTokens = (
   template: string,
   ctx: { pulseName: string; date: string; group: string; rowCount: number; resultsTable?: string }
@@ -1051,7 +1075,9 @@ Deno.serve(async (req: Request) => {
 
               // Build results table if body contains {results_table}
               if (bodyTemplate.includes("{results_table}") && rows.length > 0) {
-                const tableColumns = (config.resultsTableColumns || null) as string[] | null;
+                const rawTableColumns = (config.resultsTableColumns || null) as string[] | null;
+                const rowKeys = rows[0] ? Object.keys(rows[0]) : [];
+                const tableColumns = sanitizeTableColumns(rawTableColumns, rowKeys);
                 const tableAliases = (config.columnAliases || config.columnMapping || null) as Record<string, string> | null;
                 const tableFormats = (config.columnFormats || null) as Record<string, string> | null;
                 const tableHeaderRow = (config.includeHeaderRow as boolean | undefined) !== false;
@@ -1365,9 +1391,11 @@ Deno.serve(async (req: Request) => {
 
     for (const iter of iterations) {
       const bodyHasTableToken = (emailCfg?.body_template || "").includes("{results_table}");
-      const tableColumns = bodyHasTableToken
+      const rawTableColumns = bodyHasTableToken
         ? ((emailCfg?.results_table_columns || []) as string[])
         : null;
+      const v1RowKeys = (Array.isArray(iter.rows) && iter.rows.length > 0 && iter.rows[0]) ? Object.keys(iter.rows[0] as Record<string, unknown>) : [];
+      const tableColumns = sanitizeTableColumns(rawTableColumns, v1RowKeys);
       const tableAliases = (emailCfg?.column_aliases || {}) as Record<string, string>;
       const tableFormats = (emailCfg?.column_formats || {}) as Record<string, string>;
       const tableIncludeHeader = emailCfg?.include_header_row !== false;
