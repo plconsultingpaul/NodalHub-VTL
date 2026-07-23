@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Save, X, AlertCircle, Play, CheckCircle2, XCircle, Loader2, Copy, Workflow, History, Sparkles } from 'lucide-react';
+import { Save, X, AlertCircle, Play, CheckCircle2, XCircle, Loader2, Copy, Workflow, History } from 'lucide-react';
 import { type Node, type Edge } from 'reactflow';
 import { supabase } from '../../lib/supabase';
 import { useActiveDashboards } from '../../contexts/ActiveDashboardsContext';
@@ -13,7 +13,7 @@ import MainTab from './MainTab';
 import ScheduleTab from './ScheduleTab';
 import WorkflowCanvas from './WorkflowCanvas';
 import ExecutionHistory from './ExecutionHistory';
-import LegacyMigration from './LegacyMigration';
+
 import type {
   Pulse,
   PulseInsert,
@@ -31,9 +31,6 @@ const emptyPulseDraft = (companyId: string, projectId: string, userId: string): 
   name: '',
   description: '',
   is_active: false,
-  query_id: null,
-  run_mode: 'result_set',
-  group_by_field: null,
   created_by: userId,
 });
 
@@ -72,7 +69,7 @@ export default function PulseBuilder() {
   } = usePulseConfig(pulseBuilderPulseId);
 
   const [activeTab, setActiveTab] = useState<PulseTabKey>('main');
-  const [viewMode, setViewMode] = useState<'info' | 'workflow' | 'history' | 'migrate'>('info');
+  const [viewMode, setViewMode] = useState<'info' | 'workflow' | 'history'>('workflow');
   const [canvasNodes, setCanvasNodes] = useState<Node[]>([]);
   const [canvasEdges, setCanvasEdges] = useState<Edge[]>([]);
   const [stepConfigs, setStepConfigs] = useState<Record<string, PulseStepConfig>>({});
@@ -127,9 +124,7 @@ export default function PulseBuilder() {
           name: data.name,
           description: data.description,
           is_active: data.is_active,
-          query_id: data.query_id,
-          run_mode: data.run_mode,
-          group_by_field: data.group_by_field,
+
           parameter_values: data.parameter_values || {},
           trigger_type: data.trigger_type || 'scheduled',
           input_variables: data.input_variables || [],
@@ -144,7 +139,7 @@ export default function PulseBuilder() {
         }
         if (data.step_configs) {
           const loaded = data.step_configs as Record<string, PulseStepConfig>;
-          // Seed pulse-level run_mode/group_by_field into the first query step config
+          // Seed run_mode/group_by_field from DB into the query step config (for backward compat)
           const queryKey = Object.keys(loaded).find(k => (loaded[k] as PulseQueryStepConfig).stepType === 'query');
           if (queryKey && data.run_mode) {
             const qc = loaded[queryKey] as PulseQueryStepConfig;
@@ -354,13 +349,6 @@ export default function PulseBuilder() {
     const effectiveEdges = overrideCanvas?.edges ?? canvasEdges;
     const effectiveConfigs = overrideCanvas?.configs ?? stepConfigs;
 
-    // Sync run_mode from query step config
-    const queryStepCfg = Object.values(effectiveConfigs).find(
-      (c): c is PulseQueryStepConfig => c.stepType === 'query'
-    );
-    const derivedRunMode = queryStepCfg?.runMode || pulseDraft.run_mode || 'result_set';
-    const derivedGroupByField = queryStepCfg?.groupByField ?? pulseDraft.group_by_field ?? null;
-
     try {
       let pulseId = pulseBuilderPulseId;
 
@@ -378,15 +366,12 @@ export default function PulseBuilder() {
         pulseId = result.data.id;
         await updatePulse(pulseId, {
           is_active: pulseDraft.is_active,
-          query_id: pulseDraft.query_id,
-          run_mode: derivedRunMode,
-          group_by_field: derivedGroupByField,
           parameter_values: pulseDraft.parameter_values || {},
           trigger_type: pulseDraft.trigger_type || 'scheduled',
           input_variables: pulseDraft.input_variables || [],
           canvas_data: effectiveNodes.length > 0 ? { nodes: effectiveNodes, edges: effectiveEdges } : null,
           step_configs: Object.keys(effectiveConfigs).length > 0 ? effectiveConfigs : null,
-          workflow_version: effectiveNodes.length > 0 ? 2 : 1,
+          workflow_version: 2,
         });
         setPulse(result.data);
       } else {
@@ -394,15 +379,12 @@ export default function PulseBuilder() {
           name: pulseDraft.name.trim(),
           description: pulseDraft.description,
           is_active: pulseDraft.is_active,
-          query_id: pulseDraft.query_id,
-          run_mode: derivedRunMode,
-          group_by_field: derivedGroupByField,
           parameter_values: pulseDraft.parameter_values || {},
           trigger_type: pulseDraft.trigger_type || 'scheduled',
           input_variables: pulseDraft.input_variables || [],
           canvas_data: effectiveNodes.length > 0 ? { nodes: effectiveNodes, edges: effectiveEdges } : null,
           step_configs: Object.keys(effectiveConfigs).length > 0 ? effectiveConfigs : null,
-          workflow_version: effectiveNodes.length > 0 ? 2 : 1,
+          workflow_version: 2,
         });
         if (update.error) {
           setError(update.error);
@@ -477,25 +459,6 @@ export default function PulseBuilder() {
     );
   }
 
-  if (viewMode === 'migrate' && pulseBuilderPulseId) {
-    return (
-      <LegacyMigration
-        pulseDraft={pulseDraft}
-        schedule={schedules[0] || null}
-        exportConfig={existingExport}
-        email={existingEmail}
-        onConvert={(nodes, edges, configs) => {
-          setCanvasNodes(nodes);
-          setCanvasEdges(edges);
-          setStepConfigs(configs);
-          setViewMode('workflow');
-        }}
-        onCancel={() => setViewMode('info')}
-        saving={saving}
-      />
-    );
-  }
-
   if (viewMode === 'workflow') {
     return (
       <WorkflowCanvas
@@ -533,12 +496,6 @@ export default function PulseBuilder() {
             />
           </div>
           <div className="flex items-center gap-2 ml-4">
-            {pulseBuilderPulseId && pulse?.query_id && (!pulse?.canvas_data || (pulse?.workflow_version || 1) === 1) && canvasNodes.length === 0 && (
-              <Button variant="secondary" onClick={() => setViewMode('migrate')} disabled={saving || running || duplicating}>
-                <Sparkles className="w-4 h-4" />
-                Convert to Workflow
-              </Button>
-            )}
             <Button variant="secondary" onClick={() => setViewMode('workflow')} disabled={saving || running || duplicating}>
               <Workflow className="w-4 h-4" />
               Workflow

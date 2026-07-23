@@ -557,9 +557,12 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     executionId = execRow?.id ?? null;
 
-    // --- V2 WORKFLOW EXECUTION ---
-    if (pulse.workflow_version === 2 && pulse.canvas_data && pulse.step_configs) {
-      console.log("[pulse-runner] Taking V2 WORKFLOW path");
+    // --- WORKFLOW EXECUTION ---
+    if (!pulse.canvas_data || !pulse.step_configs) {
+      throw new Error("Pulse has no workflow configured. Please open the Pulse and set up its workflow canvas.");
+    }
+    {
+      console.log("[pulse-runner] Executing workflow");
       const canvasData = pulse.canvas_data as { nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data?: { label?: string } }>; edges: Array<{ id: string; source: string; target: string; sourceHandle?: string }> };
       const stepConfigs = pulse.step_configs as Record<string, Record<string, unknown>>;
       const { nodes, edges } = canvasData;
@@ -1010,34 +1013,36 @@ Deno.serve(async (req: Request) => {
 
             // Get data from context for attachment
             const sourceData = dataSourceVar ? context[dataSourceVar] : null;
-            const rows = sourceData ? flattenRows(sourceData) : [];
+            const allRows = sourceData ? flattenRows(sourceData) : [];
 
-            // Resolve {{column}} tokens in recipient lists
-            const resolveRecipientTokens = (recipients: string[]): string[] => {
-              const resolved: string[] = [];
-              for (const entry of recipients) {
-                const match = entry.trim().match(/^\{\{(.+)\}\}$/);
-                if (match && rows.length > 0) {
-                  const colName = match[1];
-                  for (const row of rows) {
-                    const val = row[colName];
-                    if (typeof val === "string" && val.includes("@") && !resolved.includes(val)) {
-                      resolved.push(val);
-                    }
-                  }
-                } else if (!entry.trim().match(/^\{\{.+\}\}$/)) {
-                  if (!resolved.includes(entry)) resolved.push(entry);
-                }
+            // Determine runMode from the upstream query step config
+            const upstreamQueryCfg = Object.values(stepConfigs).find(
+              (c) => c.stepType === "query" && ((c.responseVariableName as string) || "") === dataSourceVar
+            ) || Object.values(stepConfigs).find((c) => c.stepType === "query");
+            const runMode = (upstreamQueryCfg?.runMode as string) || "result_set";
+            const groupByField = (upstreamQueryCfg?.groupByField as string) || "";
+
+            // Build iterations based on runMode
+            type Iteration = { label: string; rows: Record<string, unknown>[] };
+            let iterations: Iteration[];
+            if (runMode === "per_row") {
+              iterations = allRows.map((r, i) => ({ label: `Row ${i + 1}`, rows: [r] }));
+            } else if (runMode === "per_group" && groupByField) {
+              const groups = new Map<string, Record<string, unknown>[]>();
+              for (const row of allRows) {
+                const key = String(row[groupByField] ?? "");
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key)!.push(row);
               }
-              return resolved;
-            };
+              iterations = Array.from(groups.entries()).map(([key, rows]) => ({ label: key, rows }));
+            } else {
+              iterations = [{ label: "all", rows: allRows }];
+            }
 
-            const resolvedTo = resolveRecipientTokens(toRecipients);
-            const resolvedCc = resolveRecipientTokens(ccRecipients);
-            const resolvedBcc = resolveRecipientTokens(bccRecipients);
+            console.log(`[pulse-runner] Email step runMode=${runMode}, iterations=${iterations.length}, totalRows=${allRows.length}`);
 
-            if (onlySendIfResults && dataSourceVar && rows.length === 0) {
-              stepResults.push({ nodeId, name: stepName, type: "email", status: "skipped", reason: "no_results", inputs: { to: resolvedTo, subject, dataSource: dataSourceVar }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+            if (onlySendIfResults && dataSourceVar && allRows.length === 0) {
+              stepResults.push({ nodeId, name: stepName, type: "email", status: "skipped", reason: "no_results", inputs: { to: toRecipients, subject, dataSource: dataSourceVar }, startedAt: stepStart, finishedAt: new Date().toISOString() });
             } else {
               // Get email provider
               const { data: emailProviders } = await admin
@@ -1057,69 +1062,101 @@ Deno.serve(async (req: Request) => {
                 emailToken = await getO365Token({ tenant_id: creds.tenant_id, client_id: creds.client_id, client_secret: creds.client_secret });
               }
 
-              const today = new Date().toISOString().slice(0, 10);
-              const ctx = { pulseName: pulse.name, date: today, group: "all", rowCount: rows.length, resultsTable: "" };
+              let totalRecipients = 0;
+              for (const iteration of iterations) {
+                const rows = iteration.rows;
 
-              // Build results table if body contains {results_table}
-              if (bodyTemplate.includes("{results_table}") && rows.length > 0) {
-                const rawTableColumns = (config.resultsTableColumns || null) as string[] | null;
-                const rowKeys = rows[0] ? Object.keys(rows[0]) : [];
-                const tableColumns = sanitizeTableColumns(rawTableColumns, rowKeys);
-                const tableAliases = (config.columnAliases || config.columnMapping || null) as Record<string, string> | null;
-                const tableFormats = (config.columnFormats || null) as Record<string, string> | null;
-                const tableHeaderRow = (config.includeHeaderRow as boolean | undefined) !== false;
-                ctx.resultsTable = buildHtmlTable(rows, tableColumns, tableAliases, tableHeaderRow, tableFormats);
-              }
+                // Resolve {{column}} tokens in recipient lists per iteration
+                const resolveRecipientTokens = (recipients: string[]): string[] => {
+                  const resolved: string[] = [];
+                  for (const entry of recipients) {
+                    const match = entry.trim().match(/^\{\{(.+)\}\}$/);
+                    if (match && rows.length > 0) {
+                      const colName = match[1];
+                      for (const row of rows) {
+                        const val = row[colName];
+                        if (typeof val === "string" && val.includes("@") && !resolved.includes(val)) {
+                          resolved.push(val);
+                        }
+                      }
+                    } else if (!entry.trim().match(/^\{\{.+\}\}$/)) {
+                      if (!resolved.includes(entry)) resolved.push(entry);
+                    }
+                  }
+                  return resolved;
+                };
 
-              const resolvedSubject = resolveTokens(subject, ctx);
-              const resolvedBody = resolveTokens(bodyTemplate, ctx);
+                const resolvedTo = resolveRecipientTokens(toRecipients);
+                const resolvedCc = resolveRecipientTokens(ccRecipients);
+                const resolvedBcc = resolveRecipientTokens(bccRecipients);
 
-              // Substitute {{varName}} from input variables in subject/body
-              const substituteInputVars = (text: string): string => {
-                if (Object.keys(inputVariables).length === 0) return text;
-                return text.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
-                  if (varName in inputVariables) return inputVariables[varName];
-                  return _m;
-                });
-              };
-              const finalSubject = substituteInputVars(resolvedSubject);
-              const finalBody = substituteInputVars(resolvedBody);
+                if (resolvedTo.length === 0 && resolvedCc.length === 0 && resolvedBcc.length === 0) continue;
 
-              // Build attachment if configured
-              let attachment: SendEmailArgs["attachment"] | undefined;
-              if (config.includeAttachment && rows.length > 0) {
-                const fmt = (config.attachmentFormat as string) || "csv";
-                const filename = (config.attachmentFilename as string) || `${pulse.name}_${today}.${fmt}`;
-                if (fmt === "xlsx") {
-                  const bytes = buildXlsxBytes(rows, true);
-                  attachment = { name: filename, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: toBase64(bytes) };
-                } else {
-                  const csvStr = buildCsv(rows, true);
-                  const bytes = new TextEncoder().encode(csvStr);
-                  attachment = { name: filename, contentType: "text/csv", base64: toBase64(bytes) };
+                const today = new Date().toISOString().slice(0, 10);
+                const ctx = { pulseName: pulse.name, date: today, group: iteration.label, rowCount: rows.length, resultsTable: "" };
+
+                // Build results table if body contains {results_table}
+                if (bodyTemplate.includes("{results_table}") && rows.length > 0) {
+                  const rawTableColumns = (config.resultsTableColumns || null) as string[] | null;
+                  const rowKeys = rows[0] ? Object.keys(rows[0]) : [];
+                  const tableColumns = sanitizeTableColumns(rawTableColumns, rowKeys);
+                  const tableAliases = (config.columnAliases || config.columnMapping || null) as Record<string, string> | null;
+                  const tableFormats = (config.columnFormats || null) as Record<string, string> | null;
+                  const tableHeaderRow = (config.includeHeaderRow as boolean | undefined) !== false;
+                  ctx.resultsTable = buildHtmlTable(rows, tableColumns, tableAliases, tableHeaderRow, tableFormats);
                 }
+
+                const resolvedSubject = resolveTokens(subject, ctx);
+                const resolvedBody = resolveTokens(bodyTemplate, ctx);
+
+                // Substitute {{varName}} from input variables in subject/body
+                const substituteInputVars = (text: string): string => {
+                  if (Object.keys(inputVariables).length === 0) return text;
+                  return text.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                    if (varName in inputVariables) return inputVariables[varName];
+                    return _m;
+                  });
+                };
+                const finalSubject = substituteInputVars(resolvedSubject);
+                const finalBody = substituteInputVars(resolvedBody);
+
+                // Build attachment if configured
+                let attachment: SendEmailArgs["attachment"] | undefined;
+                if (config.includeAttachment && rows.length > 0) {
+                  const fmt = (config.attachmentFormat as string) || "csv";
+                  const filename = (config.attachmentFilename as string) || `${pulse.name}_${today}.${fmt}`;
+                  if (fmt === "xlsx") {
+                    const bytes = buildXlsxBytes(rows, true);
+                    attachment = { name: filename, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: toBase64(bytes) };
+                  } else {
+                    const csvStr = buildCsv(rows, true);
+                    const bytes = new TextEncoder().encode(csvStr);
+                    attachment = { name: filename, contentType: "text/csv", base64: toBase64(bytes) };
+                  }
+                }
+
+                const useHtml = bodyType === "html" || bodyTemplate.includes("{results_table}");
+                const sendArgs: SendEmailArgs = {
+                  fromEmail: provider.send_from_email,
+                  token: emailToken,
+                  to: resolvedTo,
+                  cc: resolvedCc,
+                  bcc: resolvedBcc,
+                  subject: finalSubject,
+                  body: useHtml && bodyType !== "html" ? finalBody.replace(/\n/g, "<br>") : finalBody,
+                  isHtml: useHtml,
+                  attachment,
+                };
+
+                if (provider.provider === "gmail") {
+                  await sendGmailEmail(sendArgs);
+                } else {
+                  await sendO365Email(sendArgs);
+                }
+                totalRecipients += resolvedTo.length + resolvedCc.length + resolvedBcc.length;
               }
 
-              const useHtml = bodyType === "html" || bodyTemplate.includes("{results_table}");
-              const sendArgs: SendEmailArgs = {
-                fromEmail: provider.send_from_email,
-                token: emailToken,
-                to: resolvedTo,
-                cc: resolvedCc,
-                bcc: resolvedBcc,
-                subject: finalSubject,
-                body: useHtml && bodyType !== "html" ? finalBody.replace(/\n/g, "<br>") : finalBody,
-                isHtml: useHtml,
-                attachment,
-              };
-
-              if (provider.provider === "gmail") {
-                await sendGmailEmail(sendArgs);
-              } else {
-                await sendO365Email(sendArgs);
-              }
-
-              stepResults.push({ nodeId, name: stepName, type: "email", status: "success", recipientCount: resolvedTo.length + resolvedCc.length + resolvedBcc.length, inputs: { to: resolvedTo, cc: resolvedCc, bcc: resolvedBcc, subject: finalSubject, dataSource: dataSourceVar }, outputs: { recipientCount: resolvedTo.length + resolvedCc.length + resolvedBcc.length, hasAttachment: !!attachment }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+              stepResults.push({ nodeId, name: stepName, type: "email", status: "success", recipientCount: totalRecipients, iterationCount: iterations.length, inputs: { to: toRecipients, cc: ccRecipients, bcc: bccRecipients, subject, dataSource: dataSourceVar, runMode }, outputs: { recipientCount: totalRecipients, iterationCount: iterations.length }, startedAt: stepStart, finishedAt: new Date().toISOString() });
             }
 
             // Follow edges
@@ -1166,383 +1203,6 @@ Deno.serve(async (req: Request) => {
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    // --- END V2 WORKFLOW ---
-
-    // --- V1 LEGACY EXECUTION (existing behavior) ---
-    console.log("[pulse-runner] Taking V1 LEGACY path");
-    if (!pulse.query_id) throw new Error("Pulse has no query configured");
-
-    const { data: query, error: qErr } = await admin
-      .from("queries")
-      .select("*, api_endpoints(*)")
-      .eq("id", pulse.query_id)
-      .maybeSingle();
-    if (qErr || !query) throw new Error(qErr?.message || "Query not found");
-    const endpoint = query.api_endpoints as Record<string, unknown> | null;
-    if (!endpoint) throw new Error("Query has no API endpoint");
-
-    const rawParamValues = (pulse.parameter_values || {}) as Record<string, string>;
-
-    // Resolve date function references (fn::uuid -> computed date value)
-    const fnRefs = Object.entries(rawParamValues).filter(([, v]) => v.startsWith(DATE_FUNCTION_PREFIX));
-    let paramValues = rawParamValues;
-    if (fnRefs.length > 0) {
-      const fnIds = fnRefs.map(([, v]) => v.slice(DATE_FUNCTION_PREFIX.length));
-      const { data: fns } = await admin
-        .from("date_functions")
-        .select("id, base_date, string_format, adjust_years, adjust_months, adjust_days")
-        .in("id", fnIds);
-      const fnMap = new Map((fns || []).map((f: Record<string, unknown>) => [f.id as string, f]));
-      const resolved: Record<string, string> = { ...rawParamValues };
-      fnRefs.forEach(([key, val]) => {
-        const fnId = val.slice(DATE_FUNCTION_PREFIX.length);
-        const fn = fnMap.get(fnId);
-        if (fn) {
-          resolved[key] = computeDateFunctionValue(
-            fn.base_date as string,
-            fn.string_format as string,
-            fn.adjust_years as number,
-            fn.adjust_months as number,
-            fn.adjust_days as number
-          );
-        } else {
-          resolved[key] = "";
-        }
-      });
-      paramValues = resolved;
-    }
-    console.log("[pulse-runner] Parameter values:", JSON.stringify(paramValues));
-    const url = buildQueryUrl(
-      endpoint.url as string,
-      query.api_sub_path || "",
-      (query.query_parameters || []) as QueryParameter[],
-      query.url_query_string || "",
-      paramValues,
-      (query.path_variable_config || {}) as Record<string, string>
-    );
-    console.log("[pulse-runner] HTTP method:", query.http_method);
-    const headers = buildAuthHeaders(endpoint);
-    const fetchOptions: RequestInit = { method: query.http_method, headers };
-    if (["POST", "PUT", "PATCH"].includes(query.http_method)) {
-      if (query.request_body_template) {
-        try {
-          const body = JSON.parse(query.request_body_template);
-          const mappings = (query.request_body_field_mappings || []) as Array<{
-            fieldName: string;
-            value: string;
-            type: string;
-            dataType: string;
-          }>;
-          mappings.forEach((mapping) => {
-            let resolvedValue = mapping.value;
-            if (mapping.type === "parameter" && mapping.value) {
-              resolvedValue = paramValues[mapping.value] || "";
-            } else if (mapping.type === "hardcoded") {
-              resolvedValue = substituteParams(resolvedValue, paramValues);
-            }
-            const typedValue = convertFieldValue(resolvedValue, mapping.dataType);
-            setNestedValue(body, mapping.fieldName, typedValue);
-          });
-          fetchOptions.body = JSON.stringify(body);
-        } catch {
-          // fall through to json_parameters
-        }
-      }
-      if (
-        !fetchOptions.body &&
-        query.json_parameters &&
-        Object.keys(query.json_parameters).length
-      ) {
-        const bodyStr = substituteParams(JSON.stringify(query.json_parameters), paramValues);
-        fetchOptions.body = bodyStr;
-      }
-      if (!fetchOptions.body && (endpoint.endpoint_type === "nodal_connect" || query.nodal_db_connection_id)) {
-        const inputs: Record<string, string> = {};
-        Object.entries(paramValues).forEach(([key, val]) => {
-          inputs[key.replace(/^@/, "")] = val;
-        });
-        fetchOptions.body = JSON.stringify({ name: query.name, inputs });
-      }
-    }
-
-    const apiRes = await fetch(url, fetchOptions);
-    const apiText = await apiRes.text();
-    console.log("[pulse-runner] API response status:", apiRes.status);
-    console.log("[pulse-runner] API response length:", apiText.length);
-    console.log("[pulse-runner] API response first 500 chars:", apiText.slice(0, 500));
-    if (!apiRes.ok) throw new Error(`Query failed ${apiRes.status}: ${apiText.slice(0, 500)}`);
-    let apiData: unknown;
-    try { apiData = JSON.parse(apiText); } catch { apiData = { rawResponse: apiText }; }
-
-    if (apiData && typeof apiData === "object" && !Array.isArray(apiData)) {
-      const keys = Object.keys(apiData as Record<string, unknown>);
-      console.log("[pulse-runner] Response top-level keys:", keys);
-      for (const key of keys) {
-        const val = (apiData as Record<string, unknown>)[key];
-        console.log(`[pulse-runner] Key "${key}": type=${typeof val}, isArray=${Array.isArray(val)}, length=${Array.isArray(val) ? val.length : 'N/A'}`);
-      }
-    }
-
-    const allRows = flattenRows(apiData);
-    if (allRows.length > 0) {
-      console.log("[pulse-runner] First row keys:", Object.keys(allRows[0]));
-    }
-
-    const { data: exportCfg } = await admin
-      .from("pulse_exports")
-      .select("*")
-      .eq("pulse_id", pulseId)
-      .maybeSingle();
-    const { data: emailCfg } = await admin
-      .from("pulse_emails")
-      .select("*")
-      .eq("pulse_id", pulseId)
-      .maybeSingle();
-    console.log("[pulse-runner] emailCfg:", JSON.stringify(emailCfg ? { enabled: emailCfg.enabled, only_send_if_results: emailCfg.only_send_if_results, include_results_table: emailCfg.include_results_table, body_template: emailCfg.body_template } : null));
-    const { data: o365Rows } = await admin
-      .from("email_configurations")
-      .select("*")
-      .eq("company_id", pulse.company_id)
-      .eq("is_configured", true)
-      .order("is_default", { ascending: false });
-    const emailProvider = (o365Rows || [])[0] ?? null;
-    console.log("[pulse-runner] emailProvider:", emailProvider ? emailProvider.provider : "NONE");
-    console.log("[pulse-runner] emailProvider configured:", !!emailProvider);
-
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Derive runMode from step_configs (query node) or fall back to pulse-level field
-    let runMode = pulse.run_mode || "result_set";
-    let groupByField = pulse.group_by_field;
-    if (pulse.step_configs) {
-      const configs = pulse.step_configs as Record<string, { stepType: string; runMode?: string; groupByField?: string | null }>;
-      const qCfg = Object.values(configs).find(c => c.stepType === "query");
-      if (qCfg?.runMode) {
-        runMode = qCfg.runMode;
-        groupByField = qCfg.groupByField ?? groupByField;
-      }
-    }
-
-    type Iter = { groupValue: string; rows: Record<string, unknown>[] };
-    let iterations: Iter[] = [];
-    if (runMode === "per_row") {
-      iterations = allRows.map((r, i) => ({
-        groupValue: String((r as Record<string, unknown>)[groupByField || ""] ?? `row-${i + 1}`),
-        rows: [r],
-      }));
-    } else if (runMode === "per_group") {
-      const field = groupByField;
-      if (!field) throw new Error("Per-group run mode requires group_by_field");
-      const grouped = new Map<string, Record<string, unknown>[]>();
-      for (const r of allRows) {
-        const key = String((r as Record<string, unknown>)[field] ?? "(empty)");
-        if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key)!.push(r);
-      }
-      iterations = Array.from(grouped, ([groupValue, rows]) => ({ groupValue, rows }));
-    } else {
-      iterations = [{ groupValue: "all", rows: allRows }];
-    }
-
-    const summary: Array<Record<string, unknown>> = [];
-    let emailsSent = 0;
-    let exportsCreated = 0;
-    let firstExportPath: string | null = null;
-    let token: string | null = null;
-    console.log("[pulse-runner] runMode:", runMode, "iterations:", iterations.length);
-    console.log("[pulse-runner] emailCfg?.enabled:", emailCfg?.enabled, "emailProvider:", !!emailProvider);
-    if (emailCfg?.enabled && emailProvider) {
-      try {
-        const creds = emailProvider.credentials as Record<string, string>;
-        console.log("[pulse-runner] Getting token for provider:", emailProvider.provider);
-        if (emailProvider.provider === "gmail") {
-          token = await getGmailToken({
-            client_id: creds.client_id,
-            client_secret: creds.client_secret,
-            refresh_token: creds.refresh_token,
-          });
-        } else {
-          token = await getO365Token({
-            tenant_id: creds.tenant_id,
-            client_id: creds.client_id,
-            client_secret: creds.client_secret,
-          });
-        }
-        console.log("[pulse-runner] Got token:", !!token);
-      } catch (err) {
-        console.error("[pulse-runner] Token error:", err instanceof Error ? err.message : String(err));
-        summary.push({ stage: "email_token", error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-
-    for (const iter of iterations) {
-      const bodyHasTableToken = (emailCfg?.body_template || "").includes("{results_table}");
-      const rawTableColumns = bodyHasTableToken
-        ? ((emailCfg?.results_table_columns || []) as string[])
-        : null;
-      const v1RowKeys = (Array.isArray(iter.rows) && iter.rows.length > 0 && iter.rows[0]) ? Object.keys(iter.rows[0] as Record<string, unknown>) : [];
-      const tableColumns = sanitizeTableColumns(rawTableColumns, v1RowKeys);
-      const tableAliases = (emailCfg?.column_aliases || {}) as Record<string, string>;
-      const tableFormats = (emailCfg?.column_formats || {}) as Record<string, string>;
-      const tableIncludeHeader = emailCfg?.include_header_row !== false;
-      const resultsTable = bodyHasTableToken
-        ? buildHtmlTable(iter.rows as Record<string, unknown>[], tableColumns, tableAliases, tableIncludeHeader, tableFormats)
-        : "";
-      const ctx = {
-        pulseName: pulse.name,
-        date: today,
-        group: iter.groupValue,
-        rowCount: iter.rows.length,
-        resultsTable,
-      };
-      const filenameBase = resolveTokens(
-        exportCfg?.filename_template || "{pulse_name}_{date}",
-        ctx
-      );
-      const fmt = exportCfg?.format === "xlsx" ? "xlsx" : "csv";
-      const filename = `${filenameBase}.${fmt}`;
-
-      let attachmentBase64: string | null = null;
-      let exportBytes: Uint8Array | null = null;
-      if (exportCfg?.enabled) {
-        try {
-          if (fmt === "xlsx") {
-            exportBytes = buildXlsxBytes(iter.rows, exportCfg.include_headers ?? true);
-          } else {
-            exportBytes = new TextEncoder().encode(buildCsv(iter.rows, exportCfg.include_headers ?? true));
-          }
-          attachmentBase64 = toBase64(exportBytes);
-          exportsCreated++;
-
-          if (executionId) {
-            const safeName = filename.replace(/[^A-Za-z0-9_.\-]+/g, "_");
-            const objectPath = `${pulseId}/${executionId}-${safeName}`;
-            const contentType =
-              fmt === "xlsx"
-                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                : "text/csv";
-            const { error: uploadErr } = await admin.storage
-              .from("pulse-exports")
-              .upload(objectPath, exportBytes, { contentType, upsert: true });
-            if (uploadErr) {
-              summary.push({ stage: "export_upload", group: iter.groupValue, error: uploadErr.message });
-            } else if (!firstExportPath) {
-              firstExportPath = objectPath;
-            }
-          }
-        } catch (err) {
-          summary.push({ stage: "export", group: iter.groupValue, error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-
-      const shouldEmail =
-        emailCfg?.enabled &&
-        token &&
-        emailProvider &&
-        (iter.rows.length > 0 || emailCfg.only_send_if_results === false);
-
-      console.log("[pulse-runner] shouldEmail check:", {
-        emailEnabled: emailCfg?.enabled,
-        hasToken: !!token,
-        hasProvider: !!emailProvider,
-        rowCount: iter.rows.length,
-        onlyIfResults: emailCfg?.only_send_if_results,
-        shouldEmail: !!shouldEmail,
-      });
-
-      if (shouldEmail) {
-        try {
-          const subject = resolveTokens(emailCfg!.subject_template || ctx.pulseName, ctx);
-          const body = resolveTokens(emailCfg!.body_template || "", ctx);
-          const useHtml = !!(bodyHasTableToken && resultsTable);
-          console.log("[pulse-runner] Sending email:", { subject, useHtml, bodyLength: body.length, to: emailCfg!.to_recipients });
-          const sendArgs: SendEmailArgs = {
-            fromEmail: emailProvider!.send_from_email,
-            token: token!,
-            to: emailCfg!.to_recipients || [],
-            cc: emailCfg!.cc_recipients || [],
-            bcc: emailCfg!.bcc_recipients || [],
-            subject,
-            body: useHtml ? body.replace(/\n/g, "<br>") : body,
-            isHtml: useHtml,
-            attachment:
-              attachmentBase64 && emailCfg!.attach_export
-                ? {
-                    name: filename,
-                    contentType:
-                      fmt === "xlsx"
-                        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        : "text/csv",
-                    base64: attachmentBase64,
-                  }
-                : undefined,
-          };
-          if (emailProvider!.provider === "gmail") {
-            await sendGmailEmail(sendArgs);
-          } else {
-            await sendO365Email(sendArgs);
-          }
-          emailsSent++;
-          console.log("[pulse-runner] Email sent successfully");
-        } catch (err) {
-          console.error("[pulse-runner] Email send error:", err instanceof Error ? err.message : String(err));
-          summary.push({ stage: "email", group: iter.groupValue, error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-
-      summary.push({
-        group: iter.groupValue,
-        row_count: iter.rows.length,
-      });
-    }
-
-    const finalStatus = summary.some((s) => "error" in s) ? "partial" : "success";
-
-    const emailRecipients: string[] = [];
-    if (emailsSent > 0 && emailCfg) {
-      if (emailCfg.to_recipients) emailRecipients.push(...emailCfg.to_recipients);
-      if (emailCfg.cc_recipients) emailRecipients.push(...emailCfg.cc_recipients);
-      if (emailCfg.bcc_recipients) emailRecipients.push(...emailCfg.bcc_recipients);
-    }
-
-    if (executionId) {
-      await admin
-        .from("pulse_executions")
-        .update({
-          status: finalStatus,
-          finished_at: new Date().toISOString(),
-          row_count: allRows.length,
-          export_path: firstExportPath,
-          result_summary: {
-            iterations: summary,
-            emails_sent: emailsSent,
-            exports_created: exportsCreated,
-            run_mode: runMode,
-            email_recipients: emailRecipients.length > 0 ? emailRecipients : undefined,
-          },
-        })
-        .eq("id", executionId);
-    }
-
-    await admin
-      .from("pulses")
-      .update({
-        last_run_at: new Date().toISOString(),
-        last_run_status: finalStatus,
-      })
-      .eq("id", pulseId);
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        executionId,
-        status: finalStatus,
-        rowCount: allRows.length,
-        emailsSent,
-        exportsCreated,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[pulse-runner] FATAL ERROR:", message);
@@ -1574,3 +1234,4 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
