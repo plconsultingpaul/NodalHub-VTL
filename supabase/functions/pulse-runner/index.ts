@@ -33,7 +33,6 @@ const flattenRows = (data: unknown): Record<string, unknown>[] => {
       const columns = obj.columns as Array<{ name: string }>;
       const dataArr = obj.data as unknown[][];
       if (columns.length > 0 && columns[0]?.name) {
-        console.log("[pulse-runner] flattenRows: detected columns+data pattern, columns:", columns.length, "rows:", dataArr.length);
         return dataArr.map((row) => {
           const rowObj: Record<string, unknown> = {};
           columns.forEach((col, i) => {
@@ -69,18 +68,11 @@ const sanitizeTableColumns = (cols: string[] | null, rowKeys: string[]): string[
     const cleaned = joined.startsWith('[') ? joined : `[${joined}]`;
     const parsed = JSON.parse(cleaned) as { name: string }[];
     const names = parsed.map((p) => p.name).filter(Boolean);
-    if (names.length > 0) {
-      console.log("[pulse-runner] sanitizeTableColumns: extracted names from corrupted config:", names);
-      return names;
-    }
+    if (names.length > 0) return names;
   } catch { /* fallthrough */ }
   const nameMatches = cols.join(',').match(/"name"\s*:\s*"([^"]+)"/g) || [];
   const extracted = nameMatches.map((m) => m.replace(/"name"\s*:\s*"/, '').replace(/"$/, '')).filter(Boolean);
-  if (extracted.length > 0) {
-    console.log("[pulse-runner] sanitizeTableColumns: regex-extracted names:", extracted);
-    return extracted;
-  }
-  console.log("[pulse-runner] sanitizeTableColumns: could not parse corrupted columns, falling back to row keys");
+  if (extracted.length > 0) return extracted;
   return rowKeys.length > 0 ? rowKeys : null;
 };
 
@@ -1018,12 +1010,7 @@ Deno.serve(async (req: Request) => {
 
             // Get data from context for attachment
             const sourceData = dataSourceVar ? context[dataSourceVar] : null;
-            console.log("[pulse-runner] Email step - dataSource:", dataSourceVar, "sourceData type:", typeof sourceData, "isArray:", Array.isArray(sourceData));
-            if (sourceData && typeof sourceData === "object" && !Array.isArray(sourceData)) {
-              console.log("[pulse-runner] Email step - sourceData keys:", Object.keys(sourceData as Record<string, unknown>));
-            }
             const rows = sourceData ? flattenRows(sourceData) : [];
-            console.log("[pulse-runner] Email step - flattenRows returned:", rows.length, "rows, first row keys:", rows[0] ? Object.keys(rows[0]) : "N/A");
 
             // Resolve {{column}} tokens in recipient lists
             const resolveRecipientTokens = (recipients: string[]): string[] => {
@@ -1297,7 +1284,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const allRows = flattenRows(apiData);
-    console.log("[pulse-runner] flattenRows returned:", allRows.length, "rows");
     if (allRows.length > 0) {
       console.log("[pulse-runner] First row keys:", Object.keys(allRows[0]));
     }
