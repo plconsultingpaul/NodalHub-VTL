@@ -1298,9 +1298,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   const updateInlineDrilldowns = useCallback(() => {
     if (!tabulatorRef.current) return;
 
+    const rows = tabulatorRef.current.getRows() || [];
     expandedRowsRef.current.forEach(rowIndex => {
-      const rows = tabulatorRef.current?.getRows() || [];
-      const row = rows[rowIndex];
+      const row = rows.find(r => (r.getData() as Record<string, unknown>)._originalIndex === rowIndex);
       if (row) {
         const rowElement = row.getElement();
         renderInlineDrilldown(rowElement, rowIndex);
@@ -1691,6 +1691,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
     try {
       const result = await executeQuery(query);
+      result.forEach((row, i) => { (row as Record<string, unknown>)._originalIndex = i; });
       setData(result);
       onRecordCount?.(result.length);
 
@@ -1919,7 +1920,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
       if (tabulatorRef.current) {
         const rows = tabulatorRef.current.getRows();
-        const row = rows[rowIndex];
+        const row = rows.find(r => (r.getData() as Record<string, unknown>)._originalIndex === rowIndex);
         if (row) {
           renderInlineDrilldown(row.getElement(), rowIndex);
         }
@@ -2003,7 +2004,8 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         headerSort: false,
         hozAlign: 'center',
         formatter: (tabulatorCell) => {
-          const rowIndex = tabulatorCell.getRow().getPosition() - 1;
+          const rowData = tabulatorCell.getRow().getData() as Record<string, unknown>;
+          const rowIndex = typeof rowData._originalIndex === 'number' ? rowData._originalIndex : tabulatorCell.getRow().getPosition() - 1;
           const hasDrilldownData = drilldownAvailabilityRef.current.has(rowIndex);
 
           if (!hasDrilldownData) {
@@ -2019,14 +2021,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           </button>`;
         },
         cellClick: (_e, tabulatorCell) => {
-          const rowIndex = tabulatorCell.getRow().getPosition() - 1;
+          const rowData = tabulatorCell.getRow().getData() as RowData;
+          const rowIndex = typeof (rowData as Record<string, unknown>)._originalIndex === 'number' ? (rowData as Record<string, unknown>)._originalIndex as number : tabulatorCell.getRow().getPosition() - 1;
           const hasDrilldownData = drilldownAvailabilityRef.current.has(rowIndex);
 
           if (!hasDrilldownData) {
             return;
           }
 
-          const rowData = tabulatorCell.getRow().getData() as RowData;
           toggleRowRef.current?.(rowIndex, rowData);
           setTimeout(() => {
             try {
