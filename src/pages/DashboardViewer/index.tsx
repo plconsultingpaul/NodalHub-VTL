@@ -582,6 +582,18 @@ export default function DashboardViewer() {
     setFixedValueMap(fvMap);
     setRequiredParameters(allParams);
 
+    // Overlay cell-level parameter defaults from settings
+    cells.forEach(cell => {
+      const cellDefaults = (cell.settings as any)?.parameter_defaults as Record<string, string> | undefined;
+      if (cellDefaults) {
+        Object.entries(cellDefaults).forEach(([paramName, val]) => {
+          if (val && allParams.some(p => p.name === paramName)) {
+            defaultValues[paramName] = val;
+          }
+        });
+      }
+    });
+
     Object.values(fvMap).forEach(fv => {
       if (fv.value_type === 'lookup') {
         resolveLookup(fv);
