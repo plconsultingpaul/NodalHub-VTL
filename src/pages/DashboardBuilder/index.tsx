@@ -37,6 +37,7 @@ interface CellConfig {
   show_parameters_in_header: boolean;
   auto_group_by_column: string | null;
   auto_group_collapsed: boolean;
+  parameter_defaults: Record<string, string>;
   drilldowns: DrilldownConfig[];
 }
 
@@ -133,6 +134,7 @@ export default function DashboardBuilder() {
         show_parameters_in_header: (c as { show_parameters_in_header?: boolean }).show_parameters_in_header ?? false,
         auto_group_by_column: (c as { auto_group_by_column?: string | null }).auto_group_by_column ?? null,
         auto_group_collapsed: (c as { auto_group_collapsed?: boolean }).auto_group_collapsed ?? false,
+        parameter_defaults: ((c as any).settings?.parameter_defaults as Record<string, string>) || {},
         drilldowns: c.drilldowns?.map(d => ({
           id: d.id,
           query_id: d.query_id,
@@ -157,6 +159,7 @@ export default function DashboardBuilder() {
         show_parameters_in_header: false,
         auto_group_by_column: null,
         auto_group_collapsed: false,
+        parameter_defaults: {},
         drilldowns: []
       }]);
     }
@@ -252,6 +255,7 @@ export default function DashboardBuilder() {
       show_parameters_in_header: false,
       auto_group_by_column: null,
       auto_group_collapsed: false,
+      parameter_defaults: {},
       drilldowns: []
     });
 
@@ -295,6 +299,7 @@ export default function DashboardBuilder() {
       show_parameters_in_header: false,
       auto_group_by_column: null,
       auto_group_collapsed: false,
+      parameter_defaults: {},
       drilldowns: []
     });
 
@@ -584,6 +589,11 @@ export default function DashboardBuilder() {
       const cellsToSave = cells.map((cell) => ({
         ...cell,
         id: cell.id,
+        settings: {
+          ...(cell.parameter_defaults && Object.keys(cell.parameter_defaults).length > 0
+            ? { parameter_defaults: cell.parameter_defaults }
+            : {})
+        },
         drilldowns: cell.drilldowns.filter(d => d.query_id)
       }));
 
