@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Play } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Play, Pencil } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import Button from '../../components/ui/Button';
 import CustomDropdown from '../../components/ui/CustomDropdown';
+import DatePicker from '../../components/ui/DatePicker';
 import type { QueryWithRelations, UserParameter } from '../../types/database';
 
 interface DrilldownConfig {
@@ -28,6 +29,7 @@ interface CellConfig {
   show_parameters_in_header: boolean;
   auto_group_by_column: string | null;
   auto_group_collapsed: boolean;
+  parameter_defaults: Record<string, string>;
   drilldowns: DrilldownConfig[];
 }
 
@@ -291,6 +293,73 @@ export default function CellConfigPanel({
           )}
         </div>
       </div>
+
+      {/* Parameter Defaults Section */}
+      {selectedQuery && ((selectedQuery.user_parameters as UserParameter[]) || []).length > 0 && (
+        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Parameter Defaults
+          </label>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            Set default values for query parameters on this cell. These override query-level defaults.
+          </p>
+          <div className="space-y-3">
+            {((selectedQuery.user_parameters as UserParameter[]) || []).map(param => {
+              const value = cell.parameter_defaults?.[param.name] || '';
+              const dataType = param.dataType || 'Text';
+              return (
+                <div key={param.name} className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {param.prompt || param.name}
+                    <span className="ml-2 text-[10px] font-normal text-gray-400 dark:text-gray-500 uppercase">{dataType}</span>
+                  </label>
+                  {dataType === 'Date' ? (
+                    <DatePicker
+                      value={value}
+                      onChange={(val) => onUpdate({
+                        parameter_defaults: { ...cell.parameter_defaults, [param.name]: val }
+                      })}
+                      placeholder="Select default date..."
+                    />
+                  ) : dataType === 'Integer' ? (
+                    <input
+                      type="number"
+                      step="1"
+                      value={value}
+                      onChange={(e) => onUpdate({
+                        parameter_defaults: { ...cell.parameter_defaults, [param.name]: e.target.value }
+                      })}
+                      placeholder="Enter integer..."
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  ) : dataType === 'Double' ? (
+                    <input
+                      type="number"
+                      step="any"
+                      value={value}
+                      onChange={(e) => onUpdate({
+                        parameter_defaults: { ...cell.parameter_defaults, [param.name]: e.target.value }
+                      })}
+                      placeholder="Enter number..."
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(e) => onUpdate({
+                        parameter_defaults: { ...cell.parameter_defaults, [param.name]: e.target.value }
+                      })}
+                      placeholder="Enter default text..."
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
         <div className="flex items-center justify-between mb-3">
