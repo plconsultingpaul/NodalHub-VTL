@@ -1477,9 +1477,15 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
 
       const ncUrl = `${ep.url.replace(/\/$/, '')}/executables/run`;
+      const declaredParams = new Set(
+        ((query.user_parameters as UserParameter[]) || []).map(p => p.name.replace(/^@/, ''))
+      );
       const inputs: Record<string, string> = {};
       Object.entries(currentParams).forEach(([key, val]) => {
-        inputs[key.replace(/^@/, '')] = val;
+        const name = key.replace(/^@/, '');
+        if (declaredParams.has(name)) {
+          inputs[name] = val;
+        }
       });
 
       const ncBody = { name: query.name, inputs };
