@@ -503,7 +503,7 @@ function createTitleWithFilter(
     const selectedValues = columnFilterState.get(field) || new Set();
     const allValues = columnAllValues.get(field) || [];
     const textFilterValue = columnTextFilterState.get(field) || '';
-    const hasDropdownFilter = selectedValues.size > 0 && selectedValues.size < allValues.length;
+    const hasDropdownFilter = selectedValues.size > 0 && (allValues.length === 0 || selectedValues.size < allValues.length);
     const hasTextFilter = textFilterValue.trim().length > 0;
     const hasActiveFilter = hasDropdownFilter || hasTextFilter;
     if (hasActiveFilter) {
@@ -978,6 +978,12 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   expandedRowsRef.current = expandedRows;
 
   const savedGroupStateRef = useRef<Map<string, boolean>>(new Map());
+  const savedFilterStateRef = useRef<{
+    filterState: Map<string, Set<string>>;
+    textFilterState: Map<string, string>;
+    filterModeState: Map<string, string>;
+    calcState: Map<string, Set<string>>;
+  } | null>(null);
 
   const drilldownAvailabilityRef = useRef(drilldownAvailability);
   drilldownAvailabilityRef.current = drilldownAvailability;
@@ -1963,6 +1969,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       return;
     }
 
+    // Check if filter state was saved by cleanup (indicates a rebuild/refresh)
+    const isRebuild = savedFilterStateRef.current !== null;
+
     if (tabulatorRef.current) {
       tabulatorRef.current.destroy();
     }
@@ -1974,18 +1983,28 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     columnCalcState.clear();
     setExpandedRows(new Set());
 
-    const savedFilters = activeTemplateRef.current?.headerFilters;
-    if (savedFilters && savedFilters.length > 0) {
-      savedFilters.forEach(f => {
-        if (f.type === 'in' && Array.isArray(f.value)) {
-          columnFilterState.set(f.field, new Set(f.value as string[]));
-        } else if (typeof f.value === 'string' && f.value.trim()) {
-          columnTextFilterState.set(f.field, f.value);
-          columnFilterModeState.set(f.field, f.type);
-        }
-      });
+    if (isRebuild && savedFilterStateRef.current) {
+      // Restore user's live filters from snapshot saved during cleanup
+      const saved = savedFilterStateRef.current;
+      saved.filterState.forEach((v, k) => columnFilterState.set(k, v));
+      saved.textFilterState.forEach((v, k) => columnTextFilterState.set(k, v));
+      saved.filterModeState.forEach((v, k) => columnFilterModeState.set(k, v));
+      saved.calcState.forEach((v, k) => columnCalcState.set(k, v));
+      savedFilterStateRef.current = null;
+    } else {
+      // First load: restore from template if available
+      const savedFilters = activeTemplateRef.current?.headerFilters;
+      if (savedFilters && savedFilters.length > 0) {
+        savedFilters.forEach(f => {
+          if (f.type === 'in' && Array.isArray(f.value)) {
+            columnFilterState.set(f.field, new Set(f.value as string[]));
+          } else if (typeof f.value === 'string' && f.value.trim()) {
+            columnTextFilterState.set(f.field, f.value);
+            columnFilterModeState.set(f.field, f.type);
+          }
+        });
+      }
     }
-
     const firstRow = data[0];
     const columns: Tabulator.ColumnDefinition[] = [];
 
@@ -2579,7 +2598,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     });
 
     const templateFilters = activeTemplateRef.current?.headerFilters;
-    if (templateFilters && templateFilters.length > 0) {
+    if (templateFilters && templateFilters.length > 0 && !isRebuild) {
       tabulatorRef.current.on('tableBuilt', () => {
         templateFilters.forEach(f => {
           try {
@@ -2601,6 +2620,78 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
+    // On rebuild, re-apply filters from restored state maps after table is built
+    if (isRebuild) {
+      tabulatorRef.current.on('tableBuilt', () => {
+        const table = tabulatorRef.current;
+        if (!table) return;
+
+        // Apply multi-select (checkbox) filters
+        columnFilterState.forEach((selectedValues, field) => {
+          if (selectedValues.size === 0) return;
+          const allValues = columnAllValues.get(field) || [];
+          // If allValues is known and everything is selected, no filter needed
+          if (allValues.length > 0 && selectedValues.size >= allValues.length) return;
+
+          const includesBlank = selectedValues.has(BLANK_SENTINEL);
+          const realValues = Array.from(selectedValues).filter(v => v !== BLANK_SENTINEL);
+
+          if (!includesBlank && realValues.length > 0) {
+            const filterFunc = (data: Record<string, unknown>) => {
+              const cellValue = data[field];
+              if (cellValue === null || cellValue === undefined || cellValue === '') return false;
+              return realValues.includes(String(cellValue));
+            };
+            columnCustomFilterRef.set(field, filterFunc);
+            table.addFilter(filterFunc);
+          } else if (includesBlank || realValues.length > 0) {
+            const filterFunc = (data: Record<string, unknown>) => {
+              const cellValue = data[field];
+              const isBlank = cellValue === null || cellValue === undefined || cellValue === '';
+              if (isBlank) return includesBlank;
+              return realValues.includes(String(cellValue));
+            };
+            columnCustomFilterRef.set(field, filterFunc);
+            table.addFilter(filterFunc);
+          }
+        });
+
+        // Apply text filters
+        columnTextFilterState.forEach((textValue, field) => {
+          if (!textValue.trim()) return;
+          const searchTerm = textValue.trim();
+          const filterMode = columnFilterModeState.get(field) || 'contains';
+
+          switch (filterMode) {
+            case 'contains':
+              table.addFilter(field, 'like', searchTerm);
+              break;
+            case 'starts':
+              table.addFilter(field, 'starts', searchTerm);
+              break;
+            case 'ends':
+              table.addFilter(field, 'ends', searchTerm);
+              break;
+            case 'equals':
+              table.addFilter(field, '=', searchTerm);
+              break;
+            case 'notcontains':
+              table.addFilter(field, (data: unknown) => {
+                const val = String(data ?? '').toLowerCase();
+                return !val.includes(searchTerm.toLowerCase());
+              });
+              break;
+            case 'notequals':
+              table.addFilter(field, '!=', searchTerm);
+              break;
+            default:
+              table.addFilter(field, 'like', searchTerm);
+          }
+        });
+
+      });
+    }
+
 
     return () => {
       if (columnChangeDebounceRef.current) {
@@ -2612,6 +2703,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       drilldownTabulatorsRef.current.clear();
 
       if (tabulatorRef.current) {
+        // Save filter state before destroying so it can be restored on rebuild
+        savedFilterStateRef.current = {
+          filterState: new Map(Array.from(columnFilterState.entries()).map(([k, v]) => [k, new Set(v)])),
+          textFilterState: new Map(columnTextFilterState),
+          filterModeState: new Map(columnFilterModeState),
+          calcState: new Map(Array.from(columnCalcState.entries()).map(([k, v]) => [k, new Set(v)])),
+        };
+
         // Save group expansion state before destroying so it can be restored on rebuild
         try {
           const groups = tabulatorRef.current.getGroups?.();
