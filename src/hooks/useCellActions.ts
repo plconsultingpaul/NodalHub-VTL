@@ -42,6 +42,7 @@ export function useCellActions() {
       visibility_condition?: ActionVisibilityCondition | null;
       prompt_title?: string;
       prompt_description?: string;
+      show_on_mobile?: boolean;
     }>
   ): Promise<{ error: string | null }> => {
     setLoading(true);
@@ -82,6 +83,7 @@ export function useCellActions() {
           visibility_condition: action.visibility_condition || null,
           prompt_title: action.prompt_title || null,
           prompt_description: action.prompt_description || null,
+          show_on_mobile: action.show_on_mobile ?? true,
         };
 
         if (action.id) {
