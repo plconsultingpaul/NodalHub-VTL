@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef, lazy, Suspense } from 'react';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
 import { RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -41,13 +41,34 @@ const SORT_DESC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="cur
 
 const BLANK_SENTINEL = '__@@BLANK@@__';
 
-const columnFilterState: Map<string, Set<string>> = new Map();
-const columnAllValues: Map<string, string[]> = new Map();
-const columnTextFilterState: Map<string, string> = new Map();
-const columnFilterModeState: Map<string, string> = new Map();
-const columnCalcState: Map<string, Set<string>> = new Map();
-const columnSortState: Map<string, 'none' | 'asc' | 'desc'> = new Map();
-const columnCustomFilterRef: Map<string, (data: Record<string, unknown>) => boolean> = new Map();
+interface CellColumnState {
+  filterState: Map<string, Set<string>>;
+  allValues: Map<string, string[]>;
+  textFilterState: Map<string, string>;
+  filterModeState: Map<string, string>;
+  calcState: Map<string, Set<string>>;
+  sortState: Map<string, 'none' | 'asc' | 'desc'>;
+  customFilterRef: Map<string, (data: Record<string, unknown>) => boolean>;
+}
+
+const cellColumnStates = new Map<string, CellColumnState>();
+
+function getCellState(cellId: string): CellColumnState {
+  let state = cellColumnStates.get(cellId);
+  if (!state) {
+    state = {
+      filterState: new Map(),
+      allValues: new Map(),
+      textFilterState: new Map(),
+      filterModeState: new Map(),
+      calcState: new Map(),
+      sortState: new Map(),
+      customFilterRef: new Map(),
+    };
+    cellColumnStates.set(cellId, state);
+  }
+  return state;
+}
 
 const FILTER_MODES = [
   { id: 'contains', label: 'Contains', short: 'C' },
@@ -86,6 +107,7 @@ function createTitleWithFilter(
   const showFilterIcon = formatterParams.showFilterIcon !== false;
   const showCalculationsIcon = formatterParams.showCalculationsIcon !== false;
   const showFilterInput = formatterParams.showFilterInput !== false;
+  const cs = getCellState(String(formatterParams.cellId || ''));
 
   const container = document.createElement('div');
   container.style.cssText = 'display:flex;flex-direction:column;width:100%;gap:4px;';
@@ -104,8 +126,8 @@ function createTitleWithFilter(
   sortIndicator.className = 'sort-indicator';
   sortIndicator.style.cssText = 'display:inline-flex;align-items:center;margin-left:2px;color:#6b7280;flex-shrink:0;';
 
-  if (!columnSortState.has(field)) {
-    columnSortState.set(field, 'none');
+  if (!cs.sortState.has(field)) {
+    cs.sortState.set(field, 'none');
   }
 
   const updateSortIndicator = (sortState: 'none' | 'asc' | 'desc') => {
@@ -120,7 +142,7 @@ function createTitleWithFilter(
     }
   };
 
-  updateSortIndicator(columnSortState.get(field) || 'none');
+  updateSortIndicator(cs.sortState.get(field) || 'none');
 
   const updateAllSortIndicators = () => {
     document.querySelectorAll('.sort-indicator').forEach(indicator => {
@@ -136,7 +158,7 @@ function createTitleWithFilter(
 
   titleSpan.onclick = (e) => {
     e.stopPropagation();
-    const currentSort = columnSortState.get(field) || 'none';
+    const currentSort = cs.sortState.get(field) || 'none';
     let nextSort: 'none' | 'asc' | 'desc';
     if (currentSort === 'none') {
       nextSort = 'asc';
@@ -145,12 +167,12 @@ function createTitleWithFilter(
     } else {
       nextSort = 'none';
     }
-    columnSortState.forEach((_, key) => {
+    cs.sortState.forEach((_, key) => {
       if (key !== field) {
-        columnSortState.set(key, 'none');
+        cs.sortState.set(key, 'none');
       }
     });
-    columnSortState.set(field, nextSort);
+    cs.sortState.set(field, nextSort);
     if (nextSort === 'none') {
       table.clearSort();
     } else {
@@ -221,12 +243,12 @@ function createTitleWithFilter(
     { id: 'sum', label: 'Sum' }
   ];
 
-  if (!columnCalcState.has(field)) {
-    columnCalcState.set(field, new Set());
+  if (!cs.calcState.has(field)) {
+    cs.calcState.set(field, new Set());
   }
 
   function updateSigmaIcon() {
-    const calcs = columnCalcState.get(field) || new Set();
+    const calcs = cs.calcState.get(field) || new Set();
     if (calcs.size > 0) {
       sigmaIcon.style.color = '#2563eb';
       sigmaIcon.style.background = '#eff6ff';
@@ -238,7 +260,7 @@ function createTitleWithFilter(
 
   function renderSigmaOptions() {
     sigmaDropdown.innerHTML = '';
-    const calcs = columnCalcState.get(field) || new Set();
+    const calcs = cs.calcState.get(field) || new Set();
 
     const headerDiv = document.createElement('div');
     headerDiv.style.cssText = 'padding:8px 12px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;';
@@ -267,13 +289,13 @@ function createTitleWithFilter(
 
       optDiv.onclick = (e) => {
         e.stopPropagation();
-        const currentCalcs = columnCalcState.get(field) || new Set();
+        const currentCalcs = cs.calcState.get(field) || new Set();
         if (currentCalcs.has(opt.id)) {
           currentCalcs.delete(opt.id);
         } else {
           currentCalcs.add(opt.id);
         }
-        columnCalcState.set(field, currentCalcs);
+        cs.calcState.set(field, currentCalcs);
         updateSigmaIcon();
         renderSigmaOptions();
         notifyCalcUpdate();
@@ -339,14 +361,14 @@ function createTitleWithFilter(
   };
 
   sigmaIcon.onmouseenter = () => {
-    const calcs = columnCalcState.get(field) || new Set();
+    const calcs = cs.calcState.get(field) || new Set();
     if (calcs.size === 0) {
       sigmaIcon.style.background = '#f3f4f6';
     }
   };
 
   sigmaIcon.onmouseleave = () => {
-    const calcs = columnCalcState.get(field) || new Set();
+    const calcs = cs.calcState.get(field) || new Set();
     if (calcs.size === 0) {
       sigmaIcon.style.background = 'transparent';
     }
@@ -380,12 +402,12 @@ function createTitleWithFilter(
   const modeDropdown = document.createElement('div');
   modeDropdown.style.cssText = 'position:relative;display:flex;';
 
-  if (!columnFilterModeState.has(field)) {
-    columnFilterModeState.set(field, 'contains');
+  if (!cs.filterModeState.has(field)) {
+    cs.filterModeState.set(field, 'contains');
   }
 
   const modeButton = document.createElement('button');
-  const currentMode = FILTER_MODES.find(m => m.id === columnFilterModeState.get(field)) || FILTER_MODES[0];
+  const currentMode = FILTER_MODES.find(m => m.id === cs.filterModeState.get(field)) || FILTER_MODES[0];
   modeButton.textContent = currentMode.short;
   modeButton.title = currentMode.label;
   modeButton.style.cssText = 'padding:0 6px;border:1px solid #d1d5db;border-right:none;border-radius:3px 0 0 3px;font-size:11px;background:#f3f4f6;cursor:pointer;color:#374151;min-width:24px;text-align:center;font-weight:500;line-height:1;';
@@ -411,7 +433,7 @@ function createTitleWithFilter(
 
     modeOption.onclick = (e) => {
       e.stopPropagation();
-      columnFilterModeState.set(field, mode.id);
+      cs.filterModeState.set(field, mode.id);
       modeButton.textContent = mode.short;
       modeButton.title = mode.label;
       modeMenu.style.display = 'none';
@@ -462,7 +484,7 @@ function createTitleWithFilter(
   textFilterInput.type = 'text';
   textFilterInput.placeholder = 'Type to filter...';
   textFilterInput.style.cssText = 'flex:1;padding:4px 6px;border:1px solid #d1d5db;border-radius:0 3px 3px 0;font-size:11px;background:#fff;min-width:0;';
-  textFilterInput.value = columnTextFilterState.get(field) || '';
+  textFilterInput.value = cs.textFilterState.get(field) || '';
 
   filterRow.appendChild(modeDropdown);
   filterRow.appendChild(textFilterInput);
@@ -472,11 +494,11 @@ function createTitleWithFilter(
     container.appendChild(filterRow);
   }
 
-  if (!columnFilterState.has(field)) {
-    columnFilterState.set(field, new Set());
+  if (!cs.filterState.has(field)) {
+    cs.filterState.set(field, new Set());
   }
-  if (!columnTextFilterState.has(field)) {
-    columnTextFilterState.set(field, '');
+  if (!cs.textFilterState.has(field)) {
+    cs.textFilterState.set(field, '');
   }
 
   function getUniqueValues(): string[] {
@@ -495,14 +517,14 @@ function createTitleWithFilter(
     if (hasBlank) {
       sorted.unshift(BLANK_SENTINEL);
     }
-    columnAllValues.set(field, sorted);
+    cs.allValues.set(field, sorted);
     return sorted;
   }
 
   function updateFilterIcon() {
-    const selectedValues = columnFilterState.get(field) || new Set();
-    const allValues = columnAllValues.get(field) || [];
-    const textFilterValue = columnTextFilterState.get(field) || '';
+    const selectedValues = cs.filterState.get(field) || new Set();
+    const allValues = cs.allValues.get(field) || [];
+    const textFilterValue = cs.textFilterState.get(field) || '';
     const hasDropdownFilter = selectedValues.size > 0 && (allValues.length === 0 || selectedValues.size < allValues.length);
     const hasTextFilter = textFilterValue.trim().length > 0;
     const hasActiveFilter = hasDropdownFilter || hasTextFilter;
@@ -518,16 +540,16 @@ function createTitleWithFilter(
   }
 
   function applyFilter() {
-    const selectedValues = columnFilterState.get(field) || new Set();
-    const allValues = columnAllValues.get(field) || [];
-    const textFilterValue = columnTextFilterState.get(field) || '';
-    const filterMode = columnFilterModeState.get(field) || 'contains';
+    const selectedValues = cs.filterState.get(field) || new Set();
+    const allValues = cs.allValues.get(field) || [];
+    const textFilterValue = cs.textFilterState.get(field) || '';
+    const filterMode = cs.filterModeState.get(field) || 'contains';
 
     // Remove any stored row-level custom filter for this field
-    const existingCustomFilter = columnCustomFilterRef.get(field);
+    const existingCustomFilter = cs.customFilterRef.get(field);
     if (existingCustomFilter) {
       table.removeFilter(existingCustomFilter);
-      columnCustomFilterRef.delete(field);
+      cs.customFilterRef.delete(field);
     }
 
     // Remove field-based filters
@@ -548,7 +570,7 @@ function createTitleWithFilter(
           if (cellValue === null || cellValue === undefined || cellValue === '') return false;
           return realValues.includes(String(cellValue));
         };
-        columnCustomFilterRef.set(field, filterFunc);
+        cs.customFilterRef.set(field, filterFunc);
         table.addFilter(filterFunc);
       } else {
         const filterFunc = (data: Record<string, unknown>) => {
@@ -557,7 +579,7 @@ function createTitleWithFilter(
           if (isBlank) return includesBlank;
           return realValues.includes(String(cellValue));
         };
-        columnCustomFilterRef.set(field, filterFunc);
+        cs.customFilterRef.set(field, filterFunc);
         table.addFilter(filterFunc);
       }
     }
@@ -596,7 +618,7 @@ function createTitleWithFilter(
 
   function renderOptions(filter: string = '') {
     optionsList.innerHTML = '';
-    const allValues = columnAllValues.get(field) || [];
+    const allValues = cs.allValues.get(field) || [];
 
     const selectAllDiv = document.createElement('div');
     selectAllDiv.style.cssText = 'padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;';
@@ -672,8 +694,8 @@ function createTitleWithFilter(
 
   function showDropdown() {
     getUniqueValues();
-    const allValues = columnAllValues.get(field) || [];
-    const currentFilter = columnFilterState.get(field) || new Set();
+    const allValues = cs.allValues.get(field) || [];
+    const currentFilter = cs.filterState.get(field) || new Set();
     if (currentFilter.size === 0) {
       pendingSelection = new Set(allValues);
     } else {
@@ -692,11 +714,11 @@ function createTitleWithFilter(
 
   okButton.onclick = (e) => {
     e.stopPropagation();
-    const allValues = columnAllValues.get(field) || [];
+    const allValues = cs.allValues.get(field) || [];
     if (pendingSelection.size === allValues.length) {
-      columnFilterState.set(field, new Set());
+      cs.filterState.set(field, new Set());
     } else {
-      columnFilterState.set(field, new Set(pendingSelection));
+      cs.filterState.set(field, new Set(pendingSelection));
     }
     applyFilter();
     hideDropdown();
@@ -733,17 +755,17 @@ function createTitleWithFilter(
   clearIcon.onclick = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    columnFilterState.set(field, new Set());
-    columnTextFilterState.set(field, '');
-    columnFilterModeState.set(field, 'contains');
+    cs.filterState.set(field, new Set());
+    cs.textFilterState.set(field, '');
+    cs.filterModeState.set(field, 'contains');
     textFilterInput.value = '';
     modeButton.textContent = 'C';
     modeButton.title = 'Contains';
     // Remove stored row-level custom filter
-    const existingCustomFilter = columnCustomFilterRef.get(field);
+    const existingCustomFilter = cs.customFilterRef.get(field);
     if (existingCustomFilter) {
       table.removeFilter(existingCustomFilter);
-      columnCustomFilterRef.delete(field);
+      cs.customFilterRef.delete(field);
     }
     // Remove field-based filters
     const currentFilters = table.getFilters(true) as Array<{ field: string; type: string; value: unknown }>;
@@ -766,9 +788,9 @@ function createTitleWithFilter(
   };
 
   filterIcon.onmouseenter = () => {
-    const selectedValues = columnFilterState.get(field) || new Set();
-    const allValues = columnAllValues.get(field) || [];
-    const textFilterValue = columnTextFilterState.get(field) || '';
+    const selectedValues = cs.filterState.get(field) || new Set();
+    const allValues = cs.allValues.get(field) || [];
+    const textFilterValue = cs.textFilterState.get(field) || '';
     const hasDropdownFilter = selectedValues.size > 0 && selectedValues.size < allValues.length;
     const hasTextFilter = textFilterValue.trim().length > 0;
     if (!hasDropdownFilter && !hasTextFilter) {
@@ -777,9 +799,9 @@ function createTitleWithFilter(
   };
 
   filterIcon.onmouseleave = () => {
-    const selectedValues = columnFilterState.get(field) || new Set();
-    const allValues = columnAllValues.get(field) || [];
-    const textFilterValue = columnTextFilterState.get(field) || '';
+    const selectedValues = cs.filterState.get(field) || new Set();
+    const allValues = cs.allValues.get(field) || [];
+    const textFilterValue = cs.textFilterState.get(field) || '';
     const hasDropdownFilter = selectedValues.size > 0 && selectedValues.size < allValues.length;
     const hasTextFilter = textFilterValue.trim().length > 0;
     if (!hasDropdownFilter && !hasTextFilter) {
@@ -788,7 +810,7 @@ function createTitleWithFilter(
   };
 
   textFilterInput.oninput = () => {
-    columnTextFilterState.set(field, textFilterInput.value);
+    cs.textFilterState.set(field, textFilterInput.value);
     applyFilter();
   };
 
@@ -830,6 +852,8 @@ interface DashboardCellProps {
   onActionComplete?: (actionName: string, result: { success: number; failed: number; pulseTriggered?: number; errors?: string[] }) => void;
   onPopupAction?: (title: string, template: string, rowData: Record<string, unknown>) => void;
   companyTimezone?: string;
+  crossFilters?: Record<string, string>;
+  onCrossFilterChange?: (field: string, value: string | null) => void;
 }
 
 export type { ActionProgressCallback };
@@ -935,7 +959,7 @@ const substitutePathParameters = (path: string, userParams: UserParameter[], par
 };
 
 const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function DashboardCell(
-  { cell, onRecordCount, parameterValues = {}, activeTemplate, templateId, onColumnChange, onColumnsDetected, onDrilldownColumnsDetected, formattingRules = {}, onGroupByChange, onActionComplete, onPopupAction, companyTimezone },
+  { cell, onRecordCount, parameterValues = {}, activeTemplate, templateId, onColumnChange, onColumnsDetected, onDrilldownColumnsDetected, formattingRules = {}, onGroupByChange, onActionComplete, onPopupAction, companyTimezone, crossFilters = {}, onCrossFilterChange },
   ref
 ) {
 
@@ -972,6 +996,10 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   onPopupActionRef.current = onPopupAction;
   const onGroupByChangeRef = useRef(onGroupByChange);
   onGroupByChangeRef.current = onGroupByChange;
+  const crossFiltersRef = useRef(crossFilters);
+  crossFiltersRef.current = crossFilters;
+  const onCrossFilterChangeRef = useRef(onCrossFilterChange);
+  onCrossFilterChangeRef.current = onCrossFilterChange;
   const promptResolveRef = useRef<((result: { success: number; failed: number; pulseTriggered: number; errors: string[] }) => void) | null>(null);
 
   const expandedRowsRef = useRef(expandedRows);
@@ -1009,6 +1037,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   const formattingRulesRef = useRef(formattingRules);
   formattingRulesRef.current = formattingRules;
   const formattingRulesKey = JSON.stringify(formattingRules);
+  const crossFiltersKey = JSON.stringify(crossFilters);
 
   useEffect(() => {
     if (!promptDialog) return;
@@ -1390,14 +1419,15 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     }
 
     const headerFilters: Array<{ field: string; type: string; value: unknown }> = [];
-    columnFilterState.forEach((selectedValues, field) => {
+    const cs = getCellState(cell.id);
+    cs.filterState.forEach((selectedValues, field) => {
       if (selectedValues.size > 0) {
         headerFilters.push({ field, type: 'in', value: Array.from(selectedValues) });
       }
     });
-    columnTextFilterState.forEach((textValue, field) => {
+    cs.textFilterState.forEach((textValue, field) => {
       if (textValue.trim()) {
-        const mode = columnFilterModeState.get(field) || 'contains';
+        const mode = cs.filterModeState.get(field) || 'contains';
         headerFilters.push({ field, type: mode, value: textValue.trim() });
       }
     });
@@ -1499,7 +1529,8 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       const ncResponse = await proxyFetch(ncUrl, {
         method: 'POST',
         headers: ncHeaders,
-        body: JSON.stringify(ncBody)
+        body: JSON.stringify(ncBody),
+        endpointId,
       });
 
       if (!ncResponse.ok) {
@@ -1586,6 +1617,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       method: query.http_method,
       headers,
       body: fetchOptions.body as string | undefined,
+      endpointId: query.api_endpoint_id,
     });
 
     if (!response.ok) {
@@ -1976,20 +2008,21 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       tabulatorRef.current.destroy();
     }
 
-    columnFilterState.clear();
-    columnAllValues.clear();
-    columnTextFilterState.clear();
-    columnFilterModeState.clear();
-    columnCalcState.clear();
+    const cs = getCellState(cell.id);
+    cs.filterState.clear();
+    cs.allValues.clear();
+    cs.textFilterState.clear();
+    cs.filterModeState.clear();
+    cs.calcState.clear();
     setExpandedRows(new Set());
 
     if (isRebuild && savedFilterStateRef.current) {
       // Restore user's live filters from snapshot saved during cleanup
       const saved = savedFilterStateRef.current;
-      saved.filterState.forEach((v, k) => columnFilterState.set(k, v));
-      saved.textFilterState.forEach((v, k) => columnTextFilterState.set(k, v));
-      saved.filterModeState.forEach((v, k) => columnFilterModeState.set(k, v));
-      saved.calcState.forEach((v, k) => columnCalcState.set(k, v));
+      saved.filterState.forEach((v, k) => cs.filterState.set(k, v));
+      saved.textFilterState.forEach((v, k) => cs.textFilterState.set(k, v));
+      saved.filterModeState.forEach((v, k) => cs.filterModeState.set(k, v));
+      saved.calcState.forEach((v, k) => cs.calcState.set(k, v));
       savedFilterStateRef.current = null;
     } else {
       // First load: restore from template if available
@@ -1997,10 +2030,10 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       if (savedFilters && savedFilters.length > 0) {
         savedFilters.forEach(f => {
           if (f.type === 'in' && Array.isArray(f.value)) {
-            columnFilterState.set(f.field, new Set(f.value as string[]));
+            cs.filterState.set(f.field, new Set(f.value as string[]));
           } else if (typeof f.value === 'string' && f.value.trim()) {
-            columnTextFilterState.set(f.field, f.value);
-            columnFilterModeState.set(f.field, f.type);
+            cs.textFilterState.set(f.field, f.value);
+            cs.filterModeState.set(f.field, f.type);
           }
         });
       }
@@ -2500,6 +2533,11 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       return cellContextMenu;
     };
 
+    let groupByFields = currentFormattingRules.groupBy || [];
+    if (groupByFields.length === 0 && cell.auto_group_by_column) {
+      groupByFields = [cell.auto_group_by_column];
+    }
+
     visibleColumns.forEach(({ key }) => {
       const tc = templateMap.get(key);
       const colFormatting = columnFormattings[key] || {};
@@ -2510,7 +2548,10 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       const colShowCalculationsIcon = colFormatting.showCalculationsIcon !== undefined ? colFormatting.showCalculationsIcon : showCalculationsIcon;
       const colShowFilterInput = colFormatting.showFilterInput !== undefined ? colFormatting.showFilterInput : showFilterInput;
 
-      const selectedCalcs = columnCalcState.get(key);
+      if (colFormatting.bottomCalc && !cs.calcState.has(key)) {
+        cs.calcState.set(key, new Set([colFormatting.bottomCalc]));
+      }
+      const selectedCalcs = cs.calcState.get(key);
       const firstCalc = selectedCalcs && selectedCalcs.size > 0 ? Array.from(selectedCalcs)[0] : null;
 
       const calcLabels: Record<string, string> = {
@@ -2527,13 +2568,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         width: tc?.width && tc.width <= 100 ? `${tc.width}%` : undefined,
         headerSort: false,
         titleFormatter: createTitleWithFilter as unknown as Tabulator.Formatter,
-        titleFormatterParams: { showFilterIcon: colShowFilterIcon, showCalculationsIcon: colShowCalculationsIcon, showFilterInput: colShowFilterInput, headerFontSize: colFormatting.fontSize || gridFormatting.fontSize },
+        titleFormatterParams: { showFilterIcon: colShowFilterIcon, showCalculationsIcon: colShowCalculationsIcon, showFilterInput: colShowFilterInput, headerFontSize: colFormatting.fontSize || gridFormatting.fontSize, cellId: cell.id },
         formatter: cellFormatter,
         contextMenu: buildContextMenu
       };
 
       if (firstCalc) {
-        colDef.bottomCalc = firstCalc as Tabulator.StandardCalc;
+        const effectiveCalc = firstCalc;
+        colDef.bottomCalc = effectiveCalc as Tabulator.StandardCalc;
         colDef.bottomCalcFormatter = (cell: Tabulator.CellComponent) => {
           const value = cell.getValue();
           const formattedValue = typeof value === 'number'
@@ -2546,12 +2588,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       columns.push(colDef);
     });
 
-    let groupByFields = currentFormattingRules.groupBy || [];
-    let groupStartOpen: boolean | ((value: string) => boolean) = true;
-    if (groupByFields.length === 0 && cell.auto_group_by_column) {
-      groupByFields = [cell.auto_group_by_column];
-      groupStartOpen = !cell.auto_group_collapsed;
-    }
+    let groupStartOpen: boolean | ((value: string) => boolean) = cell.auto_group_by_column && groupByFields.includes(cell.auto_group_by_column) && cell.auto_group_collapsed ? false : true;
 
     // If we have saved group state, use it as the groupStartOpen function
     // so each group is created in its correct state from the start
@@ -2565,8 +2602,26 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       };
     }
 
+    const currentCrossFilters = crossFiltersRef.current;
+    const ownCrossFilterField = cell.crossfilter_column;
+    const filteredData = Object.keys(currentCrossFilters).length > 0
+      ? data.filter(row => {
+          return Object.entries(currentCrossFilters).every(([field, value]) => {
+            if (field === ownCrossFilterField) return true;
+            const rawVal = row[field];
+            const fieldDateFormat = columnFormattings[field]?.dateFormat as string | undefined;
+            const comparable = fieldDateFormat
+              ? (formatDateValue(rawVal, fieldDateFormat, companyTimezone) ?? String(rawVal ?? ''))
+              : String(rawVal ?? '');
+            return comparable === String(value);
+          });
+        })
+      : data;
+
+    const displayData = filteredData;
+
     const tabulatorOptions: Record<string, unknown> = {
-      data: data,
+      data: displayData,
       columns: columns,
       layout: 'fitDataFill',
       movableColumns: true,
@@ -2584,11 +2639,24 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         const field = group.getField();
         const colFormatting = columnFormattings[field] || {};
         const displayName = colFormatting.displayName || field.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
-        return `${displayName}: ${value ?? '(empty)'} <span style="color:#6b7280;margin-left:8px;">(${count} item${count !== 1 ? 's' : ''})</span>`;
+        const cf = crossFiltersRef.current;
+        const isActive = cf[field] !== undefined && String(cf[field]) === String(value ?? '');
+        const activeStyle = isActive ? 'background:#dbeafe;border-left:3px solid #3b82f6;font-weight:600;' : '';
+        const clickHint = cell.crossfilter_column ? ' cursor:pointer;' : '';
+        return `<span style="${activeStyle}${clickHint}padding:2px 6px;border-radius:4px;display:inline-block;">${displayName}: ${value ?? '(empty)'} <span style="color:#6b7280;margin-left:8px;">(${count} item${count !== 1 ? 's' : ''})</span>${isActive ? ' <span style="color:#3b82f6;margin-left:4px;font-size:11px;">&#10005;</span>' : ''}</span>`;
       };
+      if (cell.crossfilter_column) {
+        tabulatorOptions.groupClick = (_e: Event, group: { getKey: () => unknown; getField: () => string }) => {
+          const field = group.getField();
+          const value = String(group.getKey() ?? '');
+          onCrossFilterChangeRef.current?.(field, value);
+        };
+      }
     }
 
     tabulatorRef.current = new Tabulator(tableRef.current, tabulatorOptions as Tabulator.Options);
+
+
 
     tabulatorRef.current.on('columnMoved', () => {
       debouncedColumnChange();
@@ -2627,9 +2695,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         if (!table) return;
 
         // Apply multi-select (checkbox) filters
-        columnFilterState.forEach((selectedValues, field) => {
+        cs.filterState.forEach((selectedValues, field) => {
           if (selectedValues.size === 0) return;
-          const allValues = columnAllValues.get(field) || [];
+          const allValues = cs.allValues.get(field) || [];
           // If allValues is known and everything is selected, no filter needed
           if (allValues.length > 0 && selectedValues.size >= allValues.length) return;
 
@@ -2642,7 +2710,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
               if (cellValue === null || cellValue === undefined || cellValue === '') return false;
               return realValues.includes(String(cellValue));
             };
-            columnCustomFilterRef.set(field, filterFunc);
+            cs.customFilterRef.set(field, filterFunc);
             table.addFilter(filterFunc);
           } else if (includesBlank || realValues.length > 0) {
             const filterFunc = (data: Record<string, unknown>) => {
@@ -2651,16 +2719,16 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
               if (isBlank) return includesBlank;
               return realValues.includes(String(cellValue));
             };
-            columnCustomFilterRef.set(field, filterFunc);
+            cs.customFilterRef.set(field, filterFunc);
             table.addFilter(filterFunc);
           }
         });
 
         // Apply text filters
-        columnTextFilterState.forEach((textValue, field) => {
+        cs.textFilterState.forEach((textValue, field) => {
           if (!textValue.trim()) return;
           const searchTerm = textValue.trim();
-          const filterMode = columnFilterModeState.get(field) || 'contains';
+          const filterMode = cs.filterModeState.get(field) || 'contains';
 
           switch (filterMode) {
             case 'contains':
@@ -2704,11 +2772,12 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
 
       if (tabulatorRef.current) {
         // Save filter state before destroying so it can be restored on rebuild
+        const csCleanup = getCellState(cell.id);
         savedFilterStateRef.current = {
-          filterState: new Map(Array.from(columnFilterState.entries()).map(([k, v]) => [k, new Set(v)])),
-          textFilterState: new Map(columnTextFilterState),
-          filterModeState: new Map(columnFilterModeState),
-          calcState: new Map(Array.from(columnCalcState.entries()).map(([k, v]) => [k, new Set(v)])),
+          filterState: new Map(Array.from(csCleanup.filterState.entries()).map(([k, v]) => [k, new Set(v)])),
+          textFilterState: new Map(csCleanup.textFilterState),
+          filterModeState: new Map(csCleanup.filterModeState),
+          calcState: new Map(Array.from(csCleanup.calcState.entries()).map(([k, v]) => [k, new Set(v)])),
         };
 
         // Save group expansion state before destroying so it can be restored on rebuild
@@ -2735,7 +2804,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         tabulatorRef.current = null;
       }
     };
-  }, [data, hasDrilldowns, cell.enable_row_selection, templateId, formattingRulesKey, debouncedColumnChange]);
+  }, [data, hasDrilldowns, cell.enable_row_selection, templateId, formattingRulesKey, crossFiltersKey, debouncedColumnChange]);
 
   useEffect(() => {
     if (!tabulatorRef.current || !hasDrilldowns) return;
@@ -2757,12 +2826,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       'max': 'Max'
     };
 
-    columnCalcState.forEach((calcs, field) => {
+    const csCalc = getCellState(cell.id);
+    csCalc.calcState.forEach((calcs, field) => {
       const firstCalc = calcs.size > 0 ? Array.from(calcs)[0] : null;
 
       if (firstCalc) {
+        const effectiveCalc = firstCalc;
         tabulatorRef.current?.updateColumnDefinition(field, {
-          bottomCalc: firstCalc as Tabulator.StandardCalc,
+          bottomCalc: effectiveCalc as Tabulator.StandardCalc,
           bottomCalcFormatter: (cell: Tabulator.CellComponent) => {
             const value = cell.getValue();
             const formattedValue = typeof value === 'number'
@@ -2831,6 +2902,34 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   }, []);
 
   const activeGroupBy = formattingRules.groupBy || [];
+
+  const widgetType = (cell as any).widget_type || 'grid';
+  const chartSettings = ((cell as any).settings as any)?.chart_settings || {};
+
+  if (widgetType !== 'grid') {
+    const WidgetRendererLazy = lazy(() => import('./widgets/WidgetRenderer'));
+    return (
+      <div className="h-full flex flex-col relative overflow-hidden">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/60 dark:bg-gray-900/60 z-10">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+          </div>
+        )}
+        {error && (
+          <div className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="truncate">{error}</span>
+            <button onClick={() => fetchDataRef.current?.()} className="ml-auto p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>}>
+          <WidgetRendererLazy widgetType={widgetType} data={data as Record<string, unknown>[]} settings={chartSettings} />
+        </Suspense>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden">
