@@ -174,11 +174,15 @@ export function useDashboardConfig(dashboardId: string | null) {
       col_span: number;
       width_percent: number;
       height_percent: number;
+      widget_type?: string;
       enable_row_selection?: boolean;
       check_drilldown_existence?: boolean;
       show_parameters_in_header?: boolean;
       auto_group_by_column?: string | null;
       auto_group_collapsed?: boolean;
+      crossfilter_column?: string | null;
+      mobile_visible_columns?: string[];
+      mobile_drilldown_columns?: string[];
       settings?: Record<string, unknown>;
       drilldowns?: Array<{
         id?: string;
@@ -218,11 +222,15 @@ export function useDashboardConfig(dashboardId: string | null) {
           col_span: cellLayout.col_span,
           width_percent: cellLayout.width_percent,
           height_percent: cellLayout.height_percent,
+          widget_type: cellLayout.widget_type ?? 'grid',
           enable_row_selection: cellLayout.enable_row_selection ?? false,
           check_drilldown_existence: cellLayout.check_drilldown_existence ?? false,
           show_parameters_in_header: cellLayout.show_parameters_in_header ?? false,
           auto_group_by_column: cellLayout.auto_group_by_column ?? null,
           auto_group_collapsed: cellLayout.auto_group_collapsed ?? false,
+          crossfilter_column: cellLayout.crossfilter_column ?? null,
+          mobile_visible_columns: cellLayout.mobile_visible_columns ?? [],
+          mobile_drilldown_columns: cellLayout.mobile_drilldown_columns ?? [],
           settings: cellLayout.settings || {}
         };
 
