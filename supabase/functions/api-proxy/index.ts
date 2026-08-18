@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +12,31 @@ interface ProxyRequest {
   method: string;
   headers?: Record<string, string>;
   body?: unknown;
+  endpointId?: string;
+}
+
+async function getProxyUrl(endpointId: string): Promise<string | null> {
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  const { data: endpoint } = await supabase
+    .from("api_endpoints")
+    .select("use_proxy, company_id")
+    .eq("id", endpointId)
+    .maybeSingle();
+
+  if (!endpoint?.use_proxy) return null;
+
+  const { data: proxyConfig } = await supabase
+    .from("proxy_configuration")
+    .select("proxy_url, is_active")
+    .eq("company_id", endpoint.company_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  return proxyConfig?.proxy_url || null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -22,7 +48,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { targetUrl, method, headers: customHeaders, body }: ProxyRequest = await req.json();
+    const { targetUrl, method, headers: customHeaders, body, endpointId }: ProxyRequest = await req.json();
 
     if (!targetUrl) {
       return new Response(
@@ -39,8 +65,6 @@ Deno.serve(async (req: Request) => {
       requestHeaders["Content-Type"] = "application/json";
     }
 
-    console.log(`[api-proxy] ${method} ${targetUrl}`);
-
     const fetchOptions: RequestInit = {
       method: method || "GET",
       headers: requestHeaders,
@@ -51,7 +75,23 @@ Deno.serve(async (req: Request) => {
       console.log(`[api-proxy] Request body sent to target:`, fetchOptions.body);
     }
 
-    const response = await fetch(targetUrl, fetchOptions);
+    let proxyUrl: string | null = null;
+    if (endpointId) {
+      proxyUrl = await getProxyUrl(endpointId);
+    }
+
+    let response: Response;
+
+    if (proxyUrl) {
+      console.log(`[api-proxy] ${method} ${targetUrl} (via proxy)`);
+      const httpClient = Deno.createHttpClient({
+        proxy: { url: proxyUrl },
+      });
+      response = await fetch(targetUrl, { ...fetchOptions, client: httpClient } as RequestInit);
+    } else {
+      console.log(`[api-proxy] ${method} ${targetUrl}`);
+      response = await fetch(targetUrl, fetchOptions);
+    }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
