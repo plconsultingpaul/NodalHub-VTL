@@ -6,7 +6,7 @@ import Button from '../../components/ui/Button';
 import CustomDropdown from '../../components/ui/CustomDropdown';
 import Modal from '../../components/ui/Modal';
 import Dropdown, { DropdownItem, DropdownDivider } from '../../components/ui/Dropdown';
-import { Plus, MoreHorizontal, Pencil, Trash2, Server, Activity, Play, CheckCircle, XCircle, Loader2, Database } from 'lucide-react';
+import { Plus, MoreHorizontal, Pencil, Trash2, Server, Activity, Play, CheckCircle, XCircle, Loader2, Database, Shield } from 'lucide-react';
 import type { ApiEndpoint, NodalDatabase, EndpointType } from '../../types/database';
 
 type AuthType = 'none' | 'api_key' | 'bearer' | 'basic';
@@ -18,6 +18,7 @@ interface EndpointFormData {
   endpoint_type: EndpointType;
   auth_type: AuthType;
   auth_config: Record<string, string>;
+  use_proxy: boolean;
 }
 
 const defaultFormData: EndpointFormData = {
@@ -26,7 +27,8 @@ const defaultFormData: EndpointFormData = {
   health_endpoint: '',
   endpoint_type: 'standard',
   auth_type: 'none',
-  auth_config: {}
+  auth_config: {},
+  use_proxy: false
 };
 
 interface TestResult {
@@ -42,7 +44,7 @@ interface DbFormData {
 
 export default function ApiEndpoints() {
   const { endpoints, nodalDatabases, loading, createEndpoint, updateEndpoint, deleteEndpoint, createNodalDatabase, updateNodalDatabase, deleteNodalDatabase } = useEndpoints();
-  const { activeCompany } = useAuth();
+  const { activeCompany, hasPermission, isAdmin } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<EndpointFormData>(defaultFormData);
@@ -70,6 +72,8 @@ export default function ApiEndpoints() {
     setShowModal(true);
   };
 
+  const canManageProxy = isAdmin || hasPermission('proxy_admin');
+
   const openEditModal = (endpoint: ApiEndpoint) => {
     setFormData({
       name: endpoint.name,
@@ -77,7 +81,8 @@ export default function ApiEndpoints() {
       health_endpoint: endpoint.health_endpoint || '',
       endpoint_type: endpoint.endpoint_type,
       auth_type: endpoint.auth_type,
-      auth_config: (endpoint.auth_config as Record<string, string>) || {}
+      auth_config: (endpoint.auth_config as Record<string, string>) || {},
+      use_proxy: endpoint.use_proxy || false
     });
     setEditingId(endpoint.id);
     setError('');
@@ -104,7 +109,8 @@ export default function ApiEndpoints() {
       health_endpoint: formData.health_endpoint || null,
       endpoint_type: formData.endpoint_type,
       auth_type: formData.auth_type,
-      auth_config: formData.auth_config
+      auth_config: formData.auth_config,
+      use_proxy: formData.use_proxy
     };
 
     let result;
@@ -168,6 +174,7 @@ export default function ApiEndpoints() {
       const response = await proxyFetch(testUrl, {
         method: 'GET',
         headers,
+        endpointId: endpoint.id,
       });
 
       if (response.ok) {
@@ -372,6 +379,12 @@ export default function ApiEndpoints() {
                           {getAuthLabel(endpoint.auth_type)}
                         </span>
                       )}
+                      {endpoint.use_proxy && (
+                        <span className="px-2 py-0.5 text-xs font-medium rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                          <Shield className="w-3 h-3" />
+                          Static IP
+                        </span>
+                      )}
                     </div>
                     {endpoint.health_endpoint && (
                       <div className="flex items-center gap-1.5 mt-1">
@@ -570,18 +583,51 @@ export default function ApiEndpoints() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Health Endpoint</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Health Endpoint</label>
             <input
               type="text"
               value={formData.health_endpoint}
               onChange={(e) => setFormData({ ...formData, health_endpoint: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent"
               placeholder="/health or /api/status"
             />
-            <p className="mt-1 text-xs text-gray-500">Optional endpoint path for health checks and testing</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Optional endpoint path for health checks and testing</p>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          {canManageProxy && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, use_proxy: !formData.use_proxy })}
+                className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                  formData.use_proxy
+                    ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20'
+                    : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Shield className={`w-5 h-5 ${formData.use_proxy ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}`} />
+                  <div className="text-left">
+                    <span className={`text-sm font-medium block ${formData.use_proxy ? 'text-amber-700 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                      Route through proxy (static IP)
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Requests will be sent from a static IP address for whitelisting
+                    </span>
+                  </div>
+                </div>
+                <div className={`relative w-10 h-5 rounded-full transition-colors ${
+                  formData.use_proxy ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'
+                }`}>
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                    formData.use_proxy ? 'translate-x-5' : 'translate-x-0.5'
+                  }`} />
+                </div>
+              </button>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
