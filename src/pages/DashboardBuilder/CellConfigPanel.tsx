@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Play, Pencil } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Play, Pencil, Smartphone, BarChart3, PieChart, TrendingUp, List, LineChart, Table, CheckCircle2, XCircle, Activity, DollarSign, Users, Package, ShoppingCart, Clock, Zap, Target } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import Button from '../../components/ui/Button';
 import CustomDropdown from '../../components/ui/CustomDropdown';
 import DatePicker from '../../components/ui/DatePicker';
-import type { QueryWithRelations, UserParameter } from '../../types/database';
+import type { QueryWithRelations, UserParameter, WidgetType, ChartSettings } from '../../types/database';
 
 interface DrilldownConfig {
   id?: string;
@@ -24,11 +24,18 @@ interface CellConfig {
   col_index: number;
   row_span: number;
   col_span: number;
+  width_percent: number;
+  height_percent: number;
+  widget_type: WidgetType;
+  chart_settings: ChartSettings;
   enable_row_selection: boolean;
   check_drilldown_existence: boolean;
   show_parameters_in_header: boolean;
   auto_group_by_column: string | null;
   auto_group_collapsed: boolean;
+  crossfilter_column: string | null;
+  mobile_visible_columns: string[];
+  mobile_drilldown_columns: string[];
   parameter_defaults: Record<string, string>;
   drilldowns: DrilldownConfig[];
 }
@@ -43,6 +50,8 @@ interface CellConfigPanelProps {
   onRemoveDrilldown: (index: number) => void;
   onSave: () => void;
   onFetchColumns?: () => void;
+  crossfilterEnabled?: boolean;
+  showOnMobile?: boolean;
 }
 
 export default function CellConfigPanel({
@@ -54,7 +63,9 @@ export default function CellConfigPanel({
   onUpdateDrilldown,
   onRemoveDrilldown,
   onSave,
-  onFetchColumns
+  onFetchColumns,
+  crossfilterEnabled,
+  showOnMobile
 }: CellConfigPanelProps) {
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [showFieldPicker, setShowFieldPicker] = useState(false);
@@ -176,6 +187,43 @@ export default function CellConfigPanel({
         />
       </div>
 
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+            Width
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={10}
+              max={100}
+              step={1}
+              value={cell.width_percent ?? 100}
+              onChange={(e) => onUpdate({ width_percent: parseInt(e.target.value) })}
+              className="flex-1 h-1.5 accent-blue-500"
+            />
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 w-8 text-right">{cell.width_percent ?? 100}%</span>
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+            Height
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={10}
+              max={100}
+              step={1}
+              value={cell.height_percent ?? 100}
+              onChange={(e) => onUpdate({ height_percent: parseInt(e.target.value) })}
+              className="flex-1 h-1.5 accent-blue-500"
+            />
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 w-8 text-right">{cell.height_percent ?? 100}%</span>
+          </div>
+        </div>
+      </div>
+
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           Main Query
@@ -187,6 +235,276 @@ export default function CellConfigPanel({
           placeholder="Select a query"
         />
       </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Display Type
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { type: 'grid' as WidgetType, icon: Table, label: 'Grid' },
+            { type: 'kpi' as WidgetType, icon: TrendingUp, label: 'KPI Card' },
+            { type: 'donut' as WidgetType, icon: PieChart, label: 'Donut' },
+            { type: 'bar' as WidgetType, icon: BarChart3, label: 'Bar Chart' },
+            { type: 'bar_list' as WidgetType, icon: List, label: 'Bar List' },
+            { type: 'line' as WidgetType, icon: LineChart, label: 'Line Chart' },
+          ]).map(({ type, icon: Icon, label }) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onUpdate({ widget_type: type })}
+              className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border text-xs font-medium transition-all ${
+                cell.widget_type === type
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                  : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Chart-specific configuration */}
+      {cell.widget_type !== 'grid' && (
+        <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Chart Settings
+          </h3>
+
+          {/* Value Field - used by KPI, Bar, BarList, Line */}
+          {['kpi', 'bar', 'bar_list', 'line'].includes(cell.widget_type) && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Value Field
+              </label>
+              <CustomDropdown
+                value={cell.chart_settings?.value_field || ''}
+                onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, value_field: val } })}
+                options={availableColumns.map(col => ({ value: col, label: col }))}
+                placeholder="Select value field"
+                size="sm"
+              />
+            </div>
+          )}
+
+          {/* Category Field - used by Donut */}
+          {cell.widget_type === 'donut' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Category Field
+                </label>
+                <CustomDropdown
+                  value={cell.chart_settings?.category_field || ''}
+                  onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, category_field: val } })}
+                  options={availableColumns.map(col => ({ value: col, label: col }))}
+                  placeholder="Select category field"
+                  size="sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Value Field
+                </label>
+                <CustomDropdown
+                  value={cell.chart_settings?.value_field || ''}
+                  onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, value_field: val } })}
+                  options={availableColumns.map(col => ({ value: col, label: col }))}
+                  placeholder="Select value field"
+                  size="sm"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Label Field - used by Bar, BarList, Line */}
+          {['bar', 'bar_list', 'line'].includes(cell.widget_type) && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Label Field {cell.widget_type === 'line' ? '(X-Axis)' : ''}
+              </label>
+              <CustomDropdown
+                value={cell.chart_settings?.label_field || ''}
+                onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, label_field: val } })}
+                options={availableColumns.map(col => ({ value: col, label: col }))}
+                placeholder="Select label field"
+                size="sm"
+              />
+            </div>
+          )}
+
+          {/* Subtitle Field - KPI only */}
+          {cell.widget_type === 'kpi' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Subtitle Field (optional)
+              </label>
+              <CustomDropdown
+                value={cell.chart_settings?.subtitle_field || ''}
+                onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, subtitle_field: val } })}
+                options={[{ value: '', label: 'None' }, ...availableColumns.map(col => ({ value: col, label: col }))]}
+                placeholder="None"
+                size="sm"
+              />
+            </div>
+          )}
+
+          {/* Trend Field - KPI only */}
+          {cell.widget_type === 'kpi' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Trend % Field (optional)
+              </label>
+              <CustomDropdown
+                value={cell.chart_settings?.trend_field || ''}
+                onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, trend_field: val } })}
+                options={[{ value: '', label: 'None' }, ...availableColumns.map(col => ({ value: col, label: col }))]}
+                placeholder="None"
+                size="sm"
+              />
+            </div>
+          )}
+
+          {/* Prefix / Suffix - KPI only */}
+          {cell.widget_type === 'kpi' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Prefix</label>
+                <input
+                  type="text"
+                  value={cell.chart_settings?.prefix || ''}
+                  onChange={(e) => onUpdate({ chart_settings: { ...cell.chart_settings, prefix: e.target.value } })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  placeholder="e.g. $"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Suffix</label>
+                <input
+                  type="text"
+                  value={cell.chart_settings?.suffix || ''}
+                  onChange={(e) => onUpdate({ chart_settings: { ...cell.chart_settings, suffix: e.target.value } })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  placeholder="e.g. %"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Aggregation */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Aggregation
+            </label>
+            <CustomDropdown
+              value={cell.chart_settings?.aggregate || 'sum'}
+              onChange={(val) => onUpdate({ chart_settings: { ...cell.chart_settings, aggregate: val as ChartSettings['aggregate'] } })}
+              options={[
+                { value: 'sum', label: 'Sum' },
+                { value: 'count', label: 'Count' },
+                { value: 'avg', label: 'Average' },
+                { value: 'min', label: 'Minimum' },
+                { value: 'max', label: 'Maximum' },
+                { value: 'first', label: 'First Value' },
+              ]}
+              placeholder="Sum"
+              size="sm"
+            />
+          </div>
+
+          {/* Color - KPI */}
+          {cell.widget_type === 'kpi' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Accent Color
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {['blue', 'emerald', 'red', 'amber', 'slate', 'cyan'].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => onUpdate({ chart_settings: { ...cell.chart_settings, color: c } })}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${
+                      (cell.chart_settings?.color || 'blue') === c
+                        ? 'border-gray-900 dark:border-white scale-110'
+                        : 'border-transparent hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: { blue: '#3b82f6', emerald: '#10b981', red: '#ef4444', amber: '#f59e0b', slate: '#64748b', cyan: '#06b6d4' }[c] }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Icon - KPI only */}
+          {cell.widget_type === 'kpi' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                Icon (optional)
+              </label>
+              <div className="grid grid-cols-6 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onUpdate({ chart_settings: { ...cell.chart_settings, icon: '' } })}
+                  className={`flex items-center justify-center p-2 rounded-lg border text-xs transition-all ${
+                    !cell.chart_settings?.icon
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                      : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-300'
+                  }`}
+                  title="No icon"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                {([
+                  { id: 'bar_chart', icon: BarChart3, label: 'Chart' },
+                  { id: 'check_circle', icon: CheckCircle2, label: 'Check' },
+                  { id: 'x_circle', icon: XCircle, label: 'X' },
+                  { id: 'activity', icon: Activity, label: 'Activity' },
+                  { id: 'dollar', icon: DollarSign, label: 'Dollar' },
+                  { id: 'users', icon: Users, label: 'Users' },
+                  { id: 'package', icon: Package, label: 'Package' },
+                  { id: 'cart', icon: ShoppingCart, label: 'Cart' },
+                  { id: 'clock', icon: Clock, label: 'Clock' },
+                  { id: 'zap', icon: Zap, label: 'Zap' },
+                  { id: 'target', icon: Target, label: 'Target' },
+                ]).map(({ id, icon: Icon, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onUpdate({ chart_settings: { ...cell.chart_settings, icon: id } })}
+                    className={`flex items-center justify-center p-2 rounded-lg border transition-all ${
+                      cell.chart_settings?.icon === id
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                        : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-300'
+                    }`}
+                    title={label}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show Legend - Donut, Line */}
+          {['donut', 'line'].includes(cell.widget_type) && (
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="show_legend"
+                checked={cell.chart_settings?.show_legend !== false}
+                onChange={(e) => onUpdate({ chart_settings: { ...cell.chart_settings, show_legend: e.target.checked } })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="show_legend" className="text-sm text-gray-700 dark:text-gray-300">
+                Show Legend
+              </label>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -293,6 +611,119 @@ export default function CellConfigPanel({
           )}
         </div>
       </div>
+
+      {crossfilterEnabled && (
+        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            CrossFilter Column
+          </label>
+          <CustomDropdown
+            value={cell.crossfilter_column || ''}
+            onChange={(val) => onUpdate({ crossfilter_column: val || null })}
+            options={[
+              { value: '', label: 'None (not participating)' },
+              ...availableColumns.map(col => ({ value: col, label: col }))
+            ]}
+            placeholder="Select crossfilter column"
+            size="sm"
+          />
+          {availableColumns.length === 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              No columns available. Run the query to fetch the column list.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Mobile Grid Columns */}
+      {showOnMobile && (
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <span className="flex items-center gap-2">
+            <Smartphone className="w-4 h-4" />
+            Mobile Grid Columns
+          </span>
+        </label>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Select which columns to show in the mobile app's main grid. If none selected, all columns will display.
+        </p>
+        {availableColumns.length > 0 ? (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+            {availableColumns.map(col => (
+              <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(cell.mobile_visible_columns || []).includes(col)}
+                  onChange={(e) => {
+                    const current = cell.mobile_visible_columns || [];
+                    const updated = e.target.checked
+                      ? [...current, col]
+                      : current.filter(c => c !== col);
+                    onUpdate({ mobile_visible_columns: updated });
+                  }}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">{col}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            No columns available. Run the query to fetch the column list.
+          </p>
+        )}
+        {(cell.mobile_visible_columns || []).length > 0 && (
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+            {(cell.mobile_visible_columns || []).length} column{(cell.mobile_visible_columns || []).length !== 1 ? 's' : ''} selected for the mobile grid
+          </p>
+        )}
+      </div>
+      )}
+
+      {/* Mobile Row Detail Columns */}
+      {showOnMobile && (
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <span className="flex items-center gap-2">
+            <Smartphone className="w-4 h-4" />
+            Mobile Row Detail Columns
+          </span>
+        </label>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Select which columns to show when a row is tapped in the mobile app. If none selected, all columns will display.
+        </p>
+        {availableColumns.length > 0 ? (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+            {availableColumns.map(col => (
+              <label key={col} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(cell.mobile_drilldown_columns || []).includes(col)}
+                  onChange={(e) => {
+                    const current = cell.mobile_drilldown_columns || [];
+                    const updated = e.target.checked
+                      ? [...current, col]
+                      : current.filter(c => c !== col);
+                    onUpdate({ mobile_drilldown_columns: updated });
+                  }}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">{col}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            No columns available. Run the query to fetch the column list.
+          </p>
+        )}
+        {(cell.mobile_drilldown_columns || []).length > 0 && (
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+            {(cell.mobile_drilldown_columns || []).length} column{(cell.mobile_drilldown_columns || []).length !== 1 ? 's' : ''} selected for the row detail
+          </p>
+        )}
+      </div>
+      )}
 
       {/* Parameter Defaults Section */}
       {selectedQuery && ((selectedQuery.user_parameters as UserParameter[]) || []).length > 0 && (
