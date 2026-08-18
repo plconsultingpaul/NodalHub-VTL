@@ -167,7 +167,7 @@ export function useLookupResolver() {
         console.log('[LookupResolver] API endpoint mode - URL:', url, 'method:', query.http_method);
       }
 
-      const response = await proxyFetch(url, fetchOptions);
+      const response = await proxyFetch(url, { ...fetchOptions, endpointId: endpoint.id });
       const responseData = await response.json();
 
       console.log('[LookupResolver] Response status:', response.status, 'data keys:', responseData ? Object.keys(responseData) : 'null');
@@ -276,7 +276,7 @@ export function useLookupResolver() {
         fetchOptions = { method: query.http_method || 'GET', headers };
       }
 
-      const response = await proxyFetch(url, fetchOptions);
+      const response = await proxyFetch(url, { ...fetchOptions, endpointId: endpoint.id });
       const responseData = await response.json();
 
       const items = extractRows(responseData);
