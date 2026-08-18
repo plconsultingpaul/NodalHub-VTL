@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLog';
 import type { Profile, CompanyWithRole } from '../types/database';
 
-export type PermissionType = 'dashboard' | 'dashboard_edit' | 'pulse' | 'settings_tab' | 'save_templates' | 'edit_grid_layout' | 'view_logs' | 'sso_application';
+export type PermissionType = 'dashboard' | 'dashboard_edit' | 'pulse' | 'settings_tab' | 'save_templates' | 'edit_grid_layout' | 'view_logs' | 'sso_application' | 'proxy_admin';
 
 export interface UserPermission {
   id: string;
