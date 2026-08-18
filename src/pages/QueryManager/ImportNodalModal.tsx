@@ -113,7 +113,7 @@ export default function ImportNodalModal({
       const headers = getEndpointAuthHeaders(nodalEndpoint);
       const url = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage?size=200`;
 
-      const response = await proxyFetch(url, { method: 'GET', headers });
+      const response = await proxyFetch(url, { method: 'GET', headers, endpointId: nodalEndpoint.id });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
