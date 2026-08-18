@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown, Smartphone } from 'lucide-react';
 import { useCellActions } from '../../hooks/useCellActions';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { usePulses } from '../../hooks/usePulses';
@@ -24,6 +24,7 @@ interface ActionConfig {
   visibility_condition?: ActionVisibilityCondition | null;
   prompt_title?: string;
   prompt_description?: string;
+  show_on_mobile: boolean;
 }
 
 interface ActionsConfigModalProps {
@@ -92,6 +93,7 @@ export default function ActionsConfigModal({
           visibility_condition: (a.visibility_condition as ActionVisibilityCondition) || null,
           prompt_title: a.prompt_title || '',
           prompt_description: a.prompt_description || '',
+          show_on_mobile: a.show_on_mobile ?? true,
         };
       }));
       setLoadingActions(false);
@@ -117,6 +119,7 @@ export default function ActionsConfigModal({
           post_action_pulse_id: null,
           pulse_variable_mappings: [],
           visibility_condition: null,
+          show_on_mobile: true,
         }
       ];
       setSelectedIndex(newActions.length - 1);
@@ -1421,6 +1424,23 @@ export default function ActionsConfigModal({
                             )}
                           </div>
                         )}
+                      </div>
+
+                      {/* Mobile Visibility */}
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                          <Smartphone className="w-3.5 h-3.5 text-gray-500" />
+                          Mobile App
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={action.show_on_mobile}
+                            onChange={(e) => handleUpdateAction(index, { show_on_mobile: e.target.checked })}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-600 dark:text-gray-400">Show this action in the mobile app</span>
+                        </label>
                       </div>
                     </div>
                   </div>
