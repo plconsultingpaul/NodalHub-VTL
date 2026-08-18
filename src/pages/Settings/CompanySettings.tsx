@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import CustomDropdown from '../../components/ui/CustomDropdown';
-import { Building2, Save, Plus, Check, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Building2, Save, Plus, Check, Pencil, Trash2, AlertTriangle, Smartphone, Download, Copy } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 
 const TIMEZONE_OPTIONS = [
   { value: 'UTC', label: 'UTC' },
@@ -44,6 +45,31 @@ export default function CompanySettings() {
   const isAdmin = activeCompany?.role === 'Admin';
   const canDelete = companies.length > 1;
 
+  const qrRef = useRef<HTMLCanvasElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleDownloadQr = useCallback(() => {
+    const canvas = qrRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `nodal-hub-${(activeCompany?.name || 'connection').replace(/\s+/g, '-').toLowerCase()}.png`;
+    link.href = url;
+    link.click();
+  }, [activeCompany?.name]);
+
+  const handleCopyPayload = useCallback(() => {
+    const payload = JSON.stringify({
+      supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+      supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      instanceName: activeCompany?.name || '',
+      application: 'nodal-hub',
+    });
+    navigator.clipboard.writeText(payload);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [activeCompany?.name]);
+
   useEffect(() => {
     setName(activeCompany?.name || '');
     setDefaultTimezone(activeCompany?.default_timezone || 'UTC');
@@ -75,32 +101,19 @@ export default function CompanySettings() {
     setCreating(true);
 
     const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .insert({ name: newCompanyName.trim() })
-      .select()
+      .rpc('create_company_with_admin', { p_name: newCompanyName.trim() })
       .single();
-
-    if (companyError || !company) {
-      setCreating(false);
-      return;
-    }
-
-    const { error: membershipError } = await supabase
-      .from('company_memberships')
-      .insert({
-        user_id: user.id,
-        company_id: company.id,
-        role: 'Admin'
-      });
 
     setCreating(false);
 
-    if (!membershipError) {
-      setShowNewCompanyModal(false);
-      setNewCompanyName('');
-      await refreshCompanies();
-      setActiveCompany({ ...company, role: 'Admin' });
+    if (companyError || !company) {
+      return;
     }
+
+    setShowNewCompanyModal(false);
+    setNewCompanyName('');
+    await refreshCompanies();
+    setActiveCompany({ ...company, role: 'Admin' });
   };
 
   const openRename = (id: string, currentName: string) => {
@@ -247,6 +260,49 @@ export default function CompanySettings() {
             )}
           </div>
         </div>
+
+        {isAdmin && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Mobile App Connection</h2>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Scan this QR code with the Nodal Hub mobile app to connect to this server
+              </p>
+            </div>
+            <div className="p-6 flex flex-col items-center gap-5">
+              <div className="bg-white p-4 rounded-lg border border-gray-100">
+                <QRCodeCanvas
+                  ref={qrRef}
+                  value={JSON.stringify({
+                    supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+                    supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+                    instanceName: activeCompany?.name || '',
+                    application: 'nodal-hub',
+                  })}
+                  size={200}
+                  level="M"
+                  includeMargin={false}
+                />
+              </div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {activeCompany?.name}
+              </p>
+              <div className="flex gap-3">
+                <Button variant="secondary" size="sm" onClick={handleDownloadQr}>
+                  <Download className="w-4 h-4" />
+                  Download PNG
+                </Button>
+                <Button variant="secondary" size="sm" onClick={handleCopyPayload}>
+                  <Copy className="w-4 h-4" />
+                  {copied ? 'Copied!' : 'Copy Payload'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
