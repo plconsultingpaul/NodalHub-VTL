@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Plus, Save, Grid3x3 as Grid3X3, LayoutGrid, Settings, Zap } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { X, Plus, Save, Grid3x3 as Grid3X3, LayoutGrid, Settings, Zap, Smartphone, Filter, ArrowDownToLine } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { proxyFetch } from '../../lib/apiProxy';
 import { useActiveDashboards } from '../../contexts/ActiveDashboardsContext';
@@ -37,6 +37,9 @@ interface CellConfig {
   show_parameters_in_header: boolean;
   auto_group_by_column: string | null;
   auto_group_collapsed: boolean;
+  crossfilter_column: string | null;
+  mobile_visible_columns: string[];
+  mobile_drilldown_columns: string[];
   parameter_defaults: Record<string, string>;
   drilldowns: DrilldownConfig[];
 }
@@ -51,6 +54,8 @@ export default function DashboardBuilder() {
 
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [dashboardName, setDashboardName] = useState('');
+  const [showOnMobile, setShowOnMobile] = useState(false);
+  const [crossfilterEnabled, setCrossfilterEnabled] = useState(false);
   const [cells, setCells] = useState<CellConfig[]>([]);
   const [selectedCellIndex, setSelectedCellIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -89,11 +94,17 @@ export default function DashboardBuilder() {
           col_span: 1,
           width_percent: 100,
           height_percent: 100,
+          widget_type: 'grid' as const,
+          chart_settings: {},
           enable_row_selection: false,
           check_drilldown_existence: false,
           show_parameters_in_header: false,
           auto_group_by_column: null,
           auto_group_collapsed: false,
+          crossfilter_column: null,
+          mobile_visible_columns: [],
+          mobile_drilldown_columns: [],
+          parameter_defaults: {},
           drilldowns: []
         }]);
         setDashboardName(builderInitialName || '');
@@ -110,6 +121,8 @@ export default function DashboardBuilder() {
       if (data) {
         setDashboard(data);
         setDashboardName(data.name);
+        setShowOnMobile(data.show_on_mobile ?? false);
+        setCrossfilterEnabled(data.crossfilter_enabled ?? false);
       }
       setLoading(false);
     };
@@ -129,11 +142,16 @@ export default function DashboardBuilder() {
         col_span: c.col_span,
         width_percent: c.width_percent ?? 100,
         height_percent: c.height_percent ?? 100,
+        widget_type: (c as any).widget_type || 'grid',
+        chart_settings: ((c as any).settings?.chart_settings as Record<string, unknown>) || {},
         enable_row_selection: c.enable_row_selection ?? false,
         check_drilldown_existence: c.check_drilldown_existence ?? false,
         show_parameters_in_header: (c as { show_parameters_in_header?: boolean }).show_parameters_in_header ?? false,
         auto_group_by_column: (c as { auto_group_by_column?: string | null }).auto_group_by_column ?? null,
         auto_group_collapsed: (c as { auto_group_collapsed?: boolean }).auto_group_collapsed ?? false,
+        crossfilter_column: (c as { crossfilter_column?: string | null }).crossfilter_column ?? null,
+        mobile_visible_columns: (c as { mobile_visible_columns?: string[] }).mobile_visible_columns ?? [],
+        mobile_drilldown_columns: (c as { mobile_drilldown_columns?: string[] }).mobile_drilldown_columns ?? [],
         parameter_defaults: ((c as any).settings?.parameter_defaults as Record<string, string>) || {},
         drilldowns: c.drilldowns?.map(d => ({
           id: d.id,
@@ -154,11 +172,16 @@ export default function DashboardBuilder() {
         col_span: 1,
         width_percent: 100,
         height_percent: 100,
+        widget_type: 'grid',
+        chart_settings: {},
         enable_row_selection: false,
         check_drilldown_existence: false,
         show_parameters_in_header: false,
         auto_group_by_column: null,
         auto_group_collapsed: false,
+        crossfilter_column: null,
+        mobile_visible_columns: [],
+        mobile_drilldown_columns: [],
         parameter_defaults: {},
         drilldowns: []
       }]);
@@ -199,6 +222,12 @@ export default function DashboardBuilder() {
         }
       }
 
+      const queryColumns = (selectedQuery as { last_known_columns?: string[] }).last_known_columns;
+      if (queryColumns && queryColumns.length > 0) {
+        setAvailableColumns(queryColumns);
+        return;
+      }
+
       if (cell.id) {
         const { data: cellData } = await supabase
           .from('dashboard_cells')
@@ -216,6 +245,62 @@ export default function DashboardBuilder() {
 
     fetchColumns();
   }, [selectedCellIndex, cells, queries]);
+
+  const resolveColumnsForCell = useCallback(async (cell: CellConfig): Promise<string[]> => {
+    const selectedQuery = queries.find(q => q.id === cell.query_id);
+    if (!selectedQuery) return [];
+
+    const queryParams = selectedQuery.query_parameters as Array<{ key: string; value: string; enabled: boolean }> | null;
+    const selectParam = queryParams?.find(p => (p.key === '$select' || p.key === 'select') && p.enabled && p.value);
+    if (selectParam?.value) {
+      return selectParam.value.split(',').map(f => f.trim()).filter(f => f.length > 0);
+    }
+
+    if (selectedQuery.api_spec_endpoint_id) {
+      const { data } = await supabase
+        .from('api_endpoint_fields')
+        .select('field_name')
+        .eq('api_spec_endpoint_id', selectedQuery.api_spec_endpoint_id)
+        .like('field_path', '[response]%')
+        .order('field_name');
+      if (data && data.length > 0) return data.map(f => f.field_name);
+    }
+
+    const queryColumns = (selectedQuery as { last_known_columns?: string[] }).last_known_columns;
+    if (queryColumns && queryColumns.length > 0) return queryColumns;
+
+    if (cell.id) {
+      const { data: cellData } = await supabase
+        .from('dashboard_cells')
+        .select('last_known_columns')
+        .eq('id', cell.id)
+        .maybeSingle();
+      if (cellData?.last_known_columns && cellData.last_known_columns.length > 0) return cellData.last_known_columns;
+    }
+
+    return [];
+  }, [queries]);
+
+  const handleToggleMobile = useCallback(async (checked: boolean) => {
+    setShowOnMobile(checked);
+    if (!checked) return;
+
+    const resolved = await Promise.all(
+      cells.map(cell => (cell.mobile_visible_columns || []).length > 0
+        ? Promise.resolve(cell.mobile_visible_columns)
+        : resolveColumnsForCell(cell))
+    );
+
+    setCells(prev => prev.map((cell, i) => ({
+      ...cell,
+      mobile_visible_columns: (cell.mobile_visible_columns || []).length > 0
+        ? cell.mobile_visible_columns
+        : resolved[i] || [],
+      mobile_drilldown_columns: (cell.mobile_drilldown_columns || []).length > 0
+        ? cell.mobile_drilldown_columns
+        : resolved[i] || [],
+    })));
+  }, [cells, resolveColumnsForCell]);
 
   const getRowIndices = useCallback(() => {
     const rows = new Set(cells.map(c => c.row_index));
@@ -239,6 +324,7 @@ export default function DashboardBuilder() {
       height_percent: newHeightPercent
     }));
 
+    const totalGridCols = getColIndices().length || 1;
     const newRowIndex = Math.max(...rowIndices, -1) + 1;
 
     updatedCells.push({
@@ -247,14 +333,19 @@ export default function DashboardBuilder() {
       row_index: newRowIndex,
       col_index: 0,
       row_span: 1,
-      col_span: 1,
+      col_span: totalGridCols,
       width_percent: 100,
       height_percent: newHeightPercent,
+      widget_type: 'grid' as const,
+      chart_settings: {},
       enable_row_selection: false,
       check_drilldown_existence: false,
       show_parameters_in_header: false,
       auto_group_by_column: null,
       auto_group_collapsed: false,
+      crossfilter_column: null,
+      mobile_visible_columns: [],
+      mobile_drilldown_columns: [],
       parameter_defaults: {},
       drilldowns: []
     });
@@ -266,20 +357,20 @@ export default function DashboardBuilder() {
     if (selectedCellIndex === null) return;
     const selectedCell = cells[selectedCellIndex];
 
-    const newWidthPercent = selectedCell.width_percent / 2;
-    if (newWidthPercent < MIN_CELL_PERCENT) return;
-
     const cellsInRow = getCellsInRow(selectedCell.row_index);
-    const cellPositionInRow = cellsInRow.findIndex(c =>
-      c.id === selectedCell.id ||
-      (c.row_index === selectedCell.row_index && c.col_index === selectedCell.col_index)
-    );
+    const newCellCount = cellsInRow.length + 1;
+    const evenWidth = Math.floor(100 / newCellCount);
+    if (evenWidth < MIN_CELL_PERCENT) return;
 
     const updatedCells = [...cells];
-    updatedCells[selectedCellIndex] = {
-      ...selectedCell,
-      width_percent: newWidthPercent
-    };
+
+    const rowCellIndices = updatedCells
+      .map((c, i) => ({ cell: c, index: i }))
+      .filter(({ cell }) => cell.row_index === selectedCell.row_index);
+
+    for (const { index } of rowCellIndices) {
+      updatedCells[index] = { ...updatedCells[index], width_percent: evenWidth, col_span: 1 };
+    }
 
     const newColIndex = cellsInRow.length > 0
       ? Math.max(...cellsInRow.map(c => c.col_index)) + 1
@@ -292,13 +383,18 @@ export default function DashboardBuilder() {
       col_index: newColIndex,
       row_span: 1,
       col_span: 1,
-      width_percent: newWidthPercent,
+      width_percent: evenWidth,
       height_percent: selectedCell.height_percent,
+      widget_type: 'grid' as const,
+      chart_settings: {},
       enable_row_selection: false,
       check_drilldown_existence: false,
       show_parameters_in_header: false,
       auto_group_by_column: null,
       auto_group_collapsed: false,
+      crossfilter_column: null,
+      mobile_visible_columns: [],
+      mobile_drilldown_columns: [],
       parameter_defaults: {},
       drilldowns: []
     });
@@ -531,7 +627,7 @@ export default function DashboardBuilder() {
         if (config?.header_name && config?.api_key) headers[config.header_name] = config.api_key;
       }
 
-      const response = await proxyFetch(url, { method: selectedQuery.http_method || 'GET', headers });
+      const response = await proxyFetch(url, { method: selectedQuery.http_method || 'GET', headers, endpointId: selectedQuery.api_endpoint_id });
       const json = await response.json();
       const rows = Array.isArray(json) ? json : (json.value && Array.isArray(json.value) ? json.value : null);
 
@@ -569,7 +665,9 @@ export default function DashboardBuilder() {
             name: dashboardName,
             project_id: builderProjectId,
             company_id: activeCompany.id,
-            created_by: user.id
+            created_by: user.id,
+            show_on_mobile: showOnMobile,
+            crossfilter_enabled: crossfilterEnabled
           })
           .select()
           .single();
@@ -580,7 +678,7 @@ export default function DashboardBuilder() {
       } else {
         const { error: updateError } = await supabase
           .from('dashboards')
-          .update({ name: dashboardName, updated_at: new Date().toISOString() })
+          .update({ name: dashboardName, show_on_mobile: showOnMobile, crossfilter_enabled: crossfilterEnabled, updated_at: new Date().toISOString() })
           .eq('id', dashboardId);
 
         if (updateError) throw updateError;
@@ -589,9 +687,13 @@ export default function DashboardBuilder() {
       const cellsToSave = cells.map((cell) => ({
         ...cell,
         id: cell.id,
+        widget_type: cell.widget_type || 'grid',
         settings: {
           ...(cell.parameter_defaults && Object.keys(cell.parameter_defaults).length > 0
             ? { parameter_defaults: cell.parameter_defaults }
+            : {}),
+          ...(cell.chart_settings && Object.keys(cell.chart_settings).length > 0
+            ? { chart_settings: cell.chart_settings }
             : {})
         },
         drilldowns: cell.drilldowns.filter(d => d.query_id)
@@ -611,6 +713,84 @@ export default function DashboardBuilder() {
   };
 
   const rowIndices = getRowIndices();
+
+  const getColIndices = useCallback(() => {
+    const cols = new Set(cells.map(c => c.col_index));
+    return Array.from(cols).sort((a, b) => a - b);
+  }, [cells]);
+
+
+  const handleMergeDown = () => {
+    if (selectedCellIndex === null || !cells[selectedCellIndex]) return;
+    const selectedCell = cells[selectedCellIndex];
+    const currentRowSpan = selectedCell.row_span || 1;
+    const sortedRows = rowIndices;
+    const currentRowPos = sortedRows.indexOf(selectedCell.row_index);
+    const nextRowIndex = sortedRows[currentRowPos + currentRowSpan];
+    if (nextRowIndex === undefined) return;
+
+    const cellsInSelectedRow = getCellsInRow(selectedCell.row_index);
+    const ordinalPos = cellsInSelectedRow.findIndex(c =>
+      c.id === selectedCell.id ||
+      (c.row_index === selectedCell.row_index && c.col_index === selectedCell.col_index)
+    );
+    const cellsInNextRow = getCellsInRow(nextRowIndex);
+    const cellBelow = cellsInNextRow.length === 1
+      ? cellsInNextRow[0]
+      : cellsInNextRow[ordinalPos] ?? null;
+    if (!cellBelow) return;
+
+    const cellBelowGlobalIndex = cells.findIndex(
+      c => c.row_index === cellBelow.row_index && c.col_index === cellBelow.col_index
+    );
+
+    const updatedCells = cells
+      .filter((_, i) => i !== cellBelowGlobalIndex)
+      .map((cell, _i) => {
+        const origIdx = cells.indexOf(cell);
+        if (origIdx === selectedCellIndex) {
+          return { ...cell, row_span: currentRowSpan + 1 };
+        }
+        return cell;
+      });
+
+    const cellsInDeletedRow = cells.filter(c => c.row_index === nextRowIndex);
+    if (cellsInDeletedRow.length === 1) {
+      const newRowCount = new Set(updatedCells.map(c => c.row_index)).size;
+      const newHeight = 100 / newRowCount;
+      setCells(updatedCells.map(c => ({ ...c, height_percent: newHeight })));
+    } else {
+      const widthToDistribute = cellBelow.width_percent / (cellsInDeletedRow.length - 1);
+      setCells(updatedCells.map(cell => {
+        if (cell.row_index === nextRowIndex) {
+          return { ...cell, width_percent: cell.width_percent + widthToDistribute };
+        }
+        return cell;
+      }));
+    }
+
+    const newIdx = updatedCells.findIndex(
+      c => c.row_index === selectedCell.row_index && c.col_index === selectedCell.col_index
+    );
+    setSelectedCellIndex(newIdx >= 0 ? newIdx : null);
+  };
+
+  const canMergeDown = useMemo(() => {
+    if (selectedCellIndex === null || !cells[selectedCellIndex]) return false;
+    const selectedCell = cells[selectedCellIndex];
+    const currentRowSpan = selectedCell.row_span || 1;
+    const sortedRows = rowIndices;
+    const currentRowPos = sortedRows.indexOf(selectedCell.row_index);
+    const nextRowIndex = sortedRows[currentRowPos + currentRowSpan];
+    if (nextRowIndex === undefined) return false;
+    const cellsInSelectedRow = getCellsInRow(selectedCell.row_index);
+    const ordinalPos = cellsInSelectedRow.findIndex(c =>
+      c.id === selectedCell.id ||
+      (c.row_index === selectedCell.row_index && c.col_index === selectedCell.col_index)
+    );
+    const cellsInNextRow = getCellsInRow(nextRowIndex);
+    return cellsInNextRow.length === 1 || ordinalPos < cellsInNextRow.length;
+  }, [selectedCellIndex, cells, rowIndices, getCellsInRow]);
 
   if (loading) {
     return (
@@ -644,7 +824,27 @@ export default function DashboardBuilder() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+              <Smartphone className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Mobile</span>
+              <input
+                type="checkbox"
+                checked={showOnMobile}
+                onChange={(e) => handleToggleMobile(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+            </label>
+            <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+              <Filter className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">CrossFilter</span>
+              <input
+                type="checkbox"
+                checked={crossfilterEnabled}
+                onChange={(e) => setCrossfilterEnabled(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+            </label>
             <Button
               variant="secondary"
               onClick={() => setConfigModalOpen(true)}
@@ -673,6 +873,14 @@ export default function DashboardBuilder() {
               <LayoutGrid className="w-4 h-4" />
               Split Cell
             </Button>
+            <Button
+              variant="secondary"
+              onClick={handleMergeDown}
+              disabled={!canMergeDown}
+            >
+              <ArrowDownToLine className="w-4 h-4" />
+              Merge Down
+            </Button>
             <Button onClick={handleSave} loading={saving} disabled={!dashboardName.trim()}>
               <Save className="w-4 h-4" />
               Save Dashboard
@@ -686,97 +894,76 @@ export default function DashboardBuilder() {
         className="flex-1 p-6 overflow-hidden"
         style={{ cursor: resizing ? (resizing.type === 'vertical' ? 'row-resize' : 'col-resize') : 'default' }}
       >
-        <div className="h-full flex flex-col">
-          {rowIndices.map((rowIndex, rowArrayIdx) => {
-            const cellsInRow = getCellsInRow(rowIndex);
-            const rowHeight = cellsInRow[0]?.height_percent ?? 100;
-
+        <div className="h-full flex flex-col gap-1">
+          {rowIndices.map((ri) => {
+            const rowCells = getCellsInRow(ri);
+            const firstCell = rowCells[0];
+            const heightFr = firstCell?.height_percent ?? (100 / rowIndices.length);
             return (
-              <div key={rowIndex} style={{ flex: rowHeight }} className="flex flex-col min-h-0">
-                <div className="flex-1 flex gap-1 min-h-0">
-                  {cellsInRow.map((cell, cellIdx) => {
-                    const globalIndex = cells.findIndex(c =>
-                      c.row_index === cell.row_index && c.col_index === cell.col_index
-                    );
-                    const query = queries.find(q => q.id === cell.query_id);
-                    const isSelected = selectedCellIndex === globalIndex;
+              <div key={ri} className="flex gap-1" style={{ flex: `${heightFr} 0 0%` }}>
+                {rowCells.map((cell) => {
+                  const globalIndex = cells.findIndex(c =>
+                    c.row_index === cell.row_index && c.col_index === cell.col_index
+                  );
+                  const query = queries.find(q => q.id === cell.query_id);
+                  const isSelected = selectedCellIndex === globalIndex;
 
-                    return (
+                  return (
+                    <div
+                      key={cell.id || `${cell.row_index}-${cell.col_index}`}
+                      style={{ flex: `${cell.width_percent} 0 0%` }}
+                    >
                       <div
-                        key={cell.id || `${rowIndex}-${cellIdx}`}
-                        className="flex h-full"
-                        style={{ width: `${cell.width_percent}%` }}
+                        className={`
+                          h-full relative rounded-lg border-2 transition-all cursor-pointer min-h-[100px]
+                          ${isSelected
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                            : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+                          }
+                        `}
+                        onClick={() => setSelectedCellIndex(globalIndex)}
                       >
-                        <div
-                          className={`
-                            flex-1 relative rounded-lg border-2 transition-all cursor-pointer min-h-[100px]
-                            ${isSelected
-                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                              : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
-                            }
-                          `}
-                          onClick={() => setSelectedCellIndex(globalIndex)}
-                        >
-                          <div className="absolute inset-0 p-4 flex flex-col">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-                                {cell.title || 'Untitled Cell'}
-                              </span>
-                              {cells.length > 1 && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteCell(globalIndex);
-                                  }}
-                                  className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-red-500"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                            <div className="flex-1 flex items-center justify-center">
-                              {query ? (
-                                <div className="text-center">
-                                  <p className="text-sm text-gray-600 dark:text-gray-400">{query.name}</p>
-                                  {cell.drilldowns.length > 0 && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                                      {cell.drilldowns.length} drilldown{cell.drilldowns.length !== 1 ? 's' : ''}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <p className="text-sm text-gray-400 dark:text-gray-500">
-                                  Select a query
-                                </p>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500 text-center">
-                              {Math.round(cell.width_percent)}% x {Math.round(cell.height_percent)}%
-                            </div>
+                        <div className="absolute inset-0 p-4 flex flex-col">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                              {cell.title || 'Untitled Cell'}
+                            </span>
+                            {cells.length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteCell(globalIndex);
+                                }}
+                                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-red-500"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center">
+                            {query ? (
+                              <div className="text-center">
+                                <p className="text-sm text-gray-600 dark:text-gray-400">{query.name}</p>
+                                {cell.drilldowns.length > 0 && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                    {cell.drilldowns.length} drilldown{cell.drilldowns.length !== 1 ? 's' : ''}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-gray-400 dark:text-gray-500">
+                                Select a query
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-400 dark:text-gray-500 text-center">
+                            {Math.round(cell.width_percent)}% x {Math.round(cell.height_percent)}%
                           </div>
                         </div>
-
-                        {cellIdx < cellsInRow.length - 1 && (
-                          <div
-                            className="w-2 cursor-col-resize flex items-center justify-center group hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded"
-                            onMouseDown={(e) => handleMouseDown(e, 'horizontal', rowIndex, cellIdx)}
-                          >
-                            <div className="w-0.5 h-8 bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-500 rounded-full" />
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
-
-                {rowArrayIdx < rowIndices.length - 1 && (
-                  <div
-                    className="h-2 cursor-row-resize flex items-center justify-center group hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded mx-1"
-                    onMouseDown={(e) => handleMouseDown(e, 'vertical', rowIndex)}
-                  >
-                    <div className="w-8 h-0.5 bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-500 rounded-full" />
-                  </div>
-                )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -798,6 +985,8 @@ export default function DashboardBuilder() {
           onRemoveDrilldown={handleRemoveDrilldown}
           onSave={() => setConfigModalOpen(false)}
           onFetchColumns={handleFetchColumns}
+          crossfilterEnabled={crossfilterEnabled}
+          showOnMobile={showOnMobile}
         />
       </Modal>
 
