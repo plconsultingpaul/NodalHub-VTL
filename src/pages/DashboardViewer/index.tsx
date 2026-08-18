@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { RefreshCw, Settings, X, Maximize2, Minimize2, SlidersHorizontal, Save, Palette, Zap, Trash2, Star, Download, Mail, FileText, Loader2, Shield, ExternalLink } from 'lucide-react';
+import { RefreshCw, Settings, X, Maximize2, Minimize2, SlidersHorizontal, Save, Palette, Zap, Trash2, Star, Download, Mail, FileText, Loader2, Shield, ExternalLink, Filter, XCircle } from 'lucide-react';
 import { useActiveDashboards } from '../../contexts/ActiveDashboardsContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -14,7 +14,7 @@ import DatePicker from '../../components/ui/DatePicker';
 import ActionToast, { ActionToastData } from '../../components/ui/ActionToast';
 import DashboardCell, { DashboardCellRef } from './DashboardCell';
 import SaveTemplateModal from './SaveTemplateModal';
-import GridFormattingModal, { DrilldownDefinition } from './GridFormattingModal';
+import GridFormattingModal, { DrilldownDefinition, CellInfo } from './GridFormattingModal';
 import EmailCsvModal from './EmailCsvModal';
 import PopupActionModal from './PopupActionModal';
 import DashboardAccessModal from './DashboardAccessModal';
@@ -81,6 +81,7 @@ export default function DashboardViewer() {
   const [emailCellTitle, setEmailCellTitle] = useState('');
   const cellRefs = useRef<Record<string, DashboardCellRef | null>>({});
   const userClearedTemplateRef = useRef(false);
+  const [crossFilters, setCrossFilters] = useState<Record<string, string>>({});
   const { fetchActionsForCell } = useCellActions();
 
   const firstCellId = cells.length > 0 ? cells[0].id : null;
@@ -129,6 +130,7 @@ export default function DashboardViewer() {
     setParametersReady(false);
     initialParamsSetRef.current = null;
     userClearedTemplateRef.current = false;
+    setCrossFilters({});
   }, [activeDashboardId]);
 
   const selectedTemplate = useMemo(() => {
@@ -483,14 +485,15 @@ export default function DashboardViewer() {
     }));
   }, [cells, drilldownColumns]);
 
-  const handleSaveFormatting = useCallback(async (cellRules: GridCellFormattingRules) => {
-    if (!formattingCellId) return;
+  const handleSaveFormatting = useCallback(async (cellRules: GridCellFormattingRules, cellId?: string) => {
+    const targetCellId = cellId || formattingCellId;
+    if (!targetCellId) return;
 
     const currentRules = selectedTemplate?.formatting_rules || { cells: {} };
     const updatedRules: GridFormattingRules = {
       cells: {
         ...currentRules.cells,
-        [formattingCellId]: cellRules
+        [targetCellId]: cellRules
       }
     };
 
@@ -504,6 +507,15 @@ export default function DashboardViewer() {
       }
     }
   }, [formattingCellId, selectedTemplateId, selectedTemplate, updateFormattingRules, createTemplate, collectAllCellConfigs]);
+
+  const allCellsForFormatting = useMemo((): CellInfo[] => {
+    return cells.map(c => ({
+      id: c.id,
+      title: c.title || 'Untitled Cell',
+      columns: cellColumns[c.id] || [],
+      drilldowns: getDrilldownDefinitions(c.id),
+    }));
+  }, [cells, cellColumns, getDrilldownDefinitions]);
 
   const getActiveFormattingRules = useCallback((): GridCellFormattingRules => {
     if (!formattingCellId || !selectedTemplate?.formatting_rules?.cells) return {};
@@ -531,6 +543,21 @@ export default function DashboardViewer() {
     };
     await updateFormattingRules(selectedTemplateId, updatedRules);
   }, [selectedTemplateId, selectedTemplate, updateFormattingRules]);
+
+  const handleCrossFilterChange = useCallback((field: string, value: string | null) => {
+    setCrossFilters(prev => {
+      const next = { ...prev };
+      if (value === null || prev[field] === value) {
+        delete next[field];
+      } else {
+        next[field] = value;
+      }
+      return next;
+    });
+  }, []);
+
+  const isCrossfilterDashboard = activeDashboard?.dashboard.crossfilter_enabled ?? false;
+  const hasCrossFilters = isCrossfilterDashboard && Object.keys(crossFilters).length > 0;
 
   useEffect(() => {
     if (loading || cells.length === 0) {
@@ -954,6 +981,13 @@ export default function DashboardViewer() {
   }, [cells]);
 
   const rowIndices = useMemo(() => getRowIndices(), [getRowIndices]);
+
+  const getColIndices = useCallback(() => {
+    const cols = new Set(cells.map(c => c.col_index));
+    return Array.from(cols).sort((a, b) => a - b);
+  }, [cells]);
+
+
 
   const handleRecordCount = useCallback((cellId: string, count: number) => {
     setCellRecordCounts(prev => ({ ...prev, [cellId]: count }));
@@ -1387,7 +1421,33 @@ export default function DashboardViewer() {
         </div>
       </div>
 
-      <div className="flex-1 p-6 overflow-hidden">
+      <div className="flex-1 p-6 overflow-hidden flex flex-col">
+        {hasCrossFilters && (
+          <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+            <Filter className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">CrossFilter:</span>
+            {Object.entries(crossFilters).map(([field, value]) => (
+              <span
+                key={field}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full border border-blue-200 dark:border-blue-800"
+              >
+                {field.replace(/_/g, ' ')}: {String(value)}
+                <button
+                  onClick={() => handleCrossFilterChange(field, null)}
+                  className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={() => setCrossFilters({})}
+              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline ml-1"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
         {cells.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
@@ -1518,6 +1578,15 @@ export default function DashboardViewer() {
                           );
                         })()}
                       </div>
+                      {isCrossfilterDashboard && cell.crossfilter_column && crossFilters[cell.crossfilter_column] && (
+                        <button
+                          onClick={() => handleCrossFilterChange(cell.crossfilter_column!, null)}
+                          className="p-1 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                          title={`Clear CrossFilter: ${cell.crossfilter_column}`}
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setFullscreenCellId(null)}
                         className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
@@ -1545,6 +1614,8 @@ export default function DashboardViewer() {
                       onActionComplete={handleActionComplete}
                       onPopupAction={handlePopupAction}
                       companyTimezone={activeCompany?.default_timezone}
+                      crossFilters={isCrossfilterDashboard ? crossFilters : {}}
+                      onCrossFilterChange={isCrossfilterDashboard ? handleCrossFilterChange : undefined}
                     />
                   )}
                 </div>
@@ -1553,21 +1624,16 @@ export default function DashboardViewer() {
           })()
         ) : (
           <div className="h-full flex flex-col gap-4">
-            {rowIndices.map((rowIndex) => {
-              const cellsInRow = getCellsInRow(rowIndex);
-              const rowHeight = cellsInRow[0]?.height_percent ?? 100;
-
+            {rowIndices.map((ri) => {
+              const rowCells = cells.filter(c => c.row_index === ri).sort((a, b) => a.col_index - b.col_index);
+              const heightFr = rowCells[0]?.height_percent ?? (100 / rowIndices.length);
               return (
-                <div
-                  key={rowIndex}
-                  className="flex gap-4 min-h-0"
-                  style={{ height: `${rowHeight}%` }}
-                >
-                  {cellsInRow.map((cell) => (
+                <div key={ri} className="flex gap-4 min-h-0" style={{ flex: `${heightFr} 0 0%` }}>
+                  {rowCells.map((cell) => (
                     <div
                       key={cell.id}
                       className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col min-h-0"
-                      style={{ width: `${cell.width_percent}%` }}
+                      style={{ flex: `${cell.width_percent} 0 0%` }}
                     >
                       {cell.title && (
                         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex-shrink-0 flex items-center justify-between">
@@ -1684,6 +1750,15 @@ export default function DashboardViewer() {
                                 );
                               })()}
                             </div>
+                            {isCrossfilterDashboard && cell.crossfilter_column && crossFilters[cell.crossfilter_column] && (
+                              <button
+                                onClick={() => handleCrossFilterChange(cell.crossfilter_column!, null)}
+                                className="p-1 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                                title={`Clear CrossFilter: ${cell.crossfilter_column}`}
+                              >
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            )}
                             {cells.length > 1 && (
                               <button
                                 onClick={() => setFullscreenCellId(cell.id)}
@@ -1716,6 +1791,8 @@ export default function DashboardViewer() {
                             onActionComplete={handleActionComplete}
                             onPopupAction={handlePopupAction}
                             companyTimezone={activeCompany?.default_timezone}
+                            crossFilters={isCrossfilterDashboard ? crossFilters : {}}
+                            onCrossFilterChange={isCrossfilterDashboard ? handleCrossFilterChange : undefined}
                           />
                         )}
                       </div>
@@ -1738,6 +1815,11 @@ export default function DashboardViewer() {
         columns={formattingCellId ? (cellColumns[formattingCellId] || []) : []}
         initialRules={getActiveFormattingRules()}
         drilldowns={formattingCellId ? getDrilldownDefinitions(formattingCellId) : []}
+        allCells={allCellsForFormatting}
+        activeCellId={formattingCellId}
+        onCellChange={setFormattingCellId}
+        getFormattingRulesForCell={getFormattingRulesForCell}
+        getDrilldownsForCell={getDrilldownDefinitions}
       />
 
       <SaveTemplateModal
