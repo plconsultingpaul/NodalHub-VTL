@@ -310,6 +310,7 @@ export async function executeActionForRow(
       method: query.http_method,
       headers,
       body,
+      endpointId: query.api_endpoint_id,
     });
 
     if (!response.ok) {
