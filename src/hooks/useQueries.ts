@@ -213,6 +213,7 @@ export function useQueries() {
         method,
         headers,
         body: fetchOptions.body as string | undefined,
+        endpointId: endpoint.id,
       });
       const data = await response.json();
       return { data, status: response.status, fullUrl: url };
