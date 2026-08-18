@@ -5,6 +5,7 @@ interface ProxyFetchOptions {
   method: string;
   headers?: Record<string, string>;
   body?: string;
+  endpointId?: string;
 }
 
 export async function proxyFetch(
@@ -18,10 +19,12 @@ export async function proxyFetch(
     method: string;
     headers?: Record<string, string>;
     body?: unknown;
+    endpointId?: string;
   } = {
     targetUrl,
     method: options.method,
     headers: options.headers,
+    endpointId: options.endpointId,
   };
 
   if (options.body) {
