@@ -154,6 +154,7 @@ export interface Database {
           updated_at: string;
           auto_refresh_minutes: number | null;
           sort_order: number;
+          show_on_mobile: boolean;
         };
         Insert: {
           id?: string;
@@ -165,6 +166,7 @@ export interface Database {
           updated_at?: string;
           auto_refresh_minutes?: number | null;
           sort_order?: number;
+          show_on_mobile?: boolean;
         };
         Update: {
           id?: string;
@@ -176,6 +178,7 @@ export interface Database {
           updated_at?: string;
           auto_refresh_minutes?: number | null;
           sort_order?: number;
+          show_on_mobile?: boolean;
         };
       };
       api_endpoints: {
@@ -189,6 +192,7 @@ export interface Database {
           auth_config: Json;
           health_endpoint: string | null;
           endpoint_type: 'standard' | 'nodal_connect';
+          use_proxy: boolean;
           company_id: string;
           created_by: string | null;
           created_at: string;
@@ -203,6 +207,7 @@ export interface Database {
           auth_config?: Json;
           health_endpoint?: string | null;
           endpoint_type?: 'standard' | 'nodal_connect';
+          use_proxy?: boolean;
           company_id: string;
           created_by?: string | null;
           created_at?: string;
@@ -217,6 +222,7 @@ export interface Database {
           auth_config?: Json;
           health_endpoint?: string | null;
           endpoint_type?: 'standard' | 'nodal_connect';
+          use_proxy?: boolean;
           company_id?: string;
           created_by?: string | null;
           created_at?: string;
@@ -550,6 +556,9 @@ export interface Database {
           show_parameters_in_header: boolean;
           auto_group_by_column: string | null;
           auto_group_collapsed: boolean;
+          widget_type: string;
+          mobile_visible_columns: string[];
+          mobile_drilldown_columns: string[];
           settings: Json;
           created_at: string;
           updated_at: string;
@@ -570,6 +579,9 @@ export interface Database {
           show_parameters_in_header?: boolean;
           auto_group_by_column?: string | null;
           auto_group_collapsed?: boolean;
+          widget_type?: string;
+          mobile_visible_columns?: string[];
+          mobile_drilldown_columns?: string[];
           settings?: Json;
           created_at?: string;
           updated_at?: string;
@@ -590,6 +602,9 @@ export interface Database {
           show_parameters_in_header?: boolean;
           auto_group_by_column?: string | null;
           auto_group_collapsed?: boolean;
+          widget_type?: string;
+          mobile_visible_columns?: string[];
+          mobile_drilldown_columns?: string[];
           settings?: Json;
           created_at?: string;
           updated_at?: string;
@@ -647,6 +662,7 @@ export interface Database {
           pulse_variable_mappings: Json;
           prompt_title: string | null;
           prompt_description: string | null;
+          show_on_mobile: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -666,6 +682,7 @@ export interface Database {
           pulse_variable_mappings?: Json;
           prompt_title?: string | null;
           prompt_description?: string | null;
+          show_on_mobile?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -685,6 +702,7 @@ export interface Database {
           pulse_variable_mappings?: Json;
           prompt_title?: string | null;
           prompt_description?: string | null;
+          show_on_mobile?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -1171,6 +1189,24 @@ export type QueryWithRelations = Query & {
 export type DashboardCell = Database['public']['Tables']['dashboard_cells']['Row'];
 export type DashboardCellDrilldown = Database['public']['Tables']['dashboard_cell_drilldowns']['Row'];
 
+export type WidgetType = 'grid' | 'kpi' | 'donut' | 'bar' | 'bar_list' | 'line';
+
+export interface ChartSettings {
+  value_field?: string;
+  label_field?: string;
+  category_field?: string;
+  color?: string;
+  colors?: string[];
+  show_legend?: boolean;
+  subtitle_field?: string;
+  trend_field?: string;
+  prefix?: string;
+  suffix?: string;
+  icon?: string;
+  value_fields?: string[];
+  aggregate?: 'sum' | 'count' | 'avg' | 'min' | 'max' | 'first';
+}
+
 export type DashboardCellWithRelations = DashboardCell & {
   queries?: Query | null;
   drilldowns?: DashboardCellDrilldownWithQuery[];
@@ -1356,6 +1392,7 @@ export interface GridColumnFormatting {
   showFilterInput?: boolean;
   dateFormat?: string;
   numberFormat?: NumberFormatConfig;
+  bottomCalc?: 'avg' | 'sum' | 'count' | 'min' | 'max';
 }
 
 export interface DrilldownFormattingRules {
