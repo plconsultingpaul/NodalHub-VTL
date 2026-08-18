@@ -50,8 +50,9 @@ export default function TeamMembers() {
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteIsAdmin, setInviteIsAdmin] = useState(false);
-  const [inviteCompanyId, setInviteCompanyId] = useState<string>('');
-  const [invitePermissions, setInvitePermissions] = useState<PermissionEntry[]>([]);
+  const [inviteCompanyIds, setInviteCompanyIds] = useState<string[]>([]);
+  const [invitePermissions, setInvitePermissions] = useState<Record<string, PermissionEntry[]>>({});
+  const [invitePermCompanyId, setInvitePermCompanyId] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [sendingInvite, setSendingInvite] = useState<string | null>(null);
@@ -62,9 +63,9 @@ export default function TeamMembers() {
   const [editUsername, setEditUsername] = useState('');
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
-  const [editIsAdmin, setEditIsAdmin] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [editCompanyAccess, setEditCompanyAccess] = useState<Record<string, { exists: boolean; role: 'Admin' | 'User'; membershipId?: string; originalExists: boolean; originalRole?: 'Admin' | 'User' }>>({});
 
   // Permissions Modal state
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
@@ -207,14 +208,17 @@ export default function TeamMembers() {
     setInviteUsername('');
     setInviteName('');
     setInviteIsAdmin(false);
-    setInviteCompanyId('');
-    setInvitePermissions([]);
+    setInviteCompanyIds([]);
+    setInvitePermissions({});
+    setInvitePermCompanyId('');
     setError('');
   };
 
+  const skipPermissionsStep = inviteIsAdmin;
+
   const handleWizardNext = () => {
     if (wizardStep === 1) {
-      if (inviteIsAdmin) {
+      if (skipPermissionsStep) {
         setWizardStep(3);
       } else {
         setWizardStep(2);
@@ -226,14 +230,20 @@ export default function TeamMembers() {
 
   const handleWizardBack = () => {
     if (wizardStep === 3) {
-      setWizardStep(inviteIsAdmin ? 1 : 2);
+      setWizardStep(skipPermissionsStep ? 1 : 2);
     } else if (wizardStep === 2) {
       setWizardStep(1);
     }
   };
 
+  const toggleInviteCompany = (companyId: string) => {
+    setInviteCompanyIds((prev) =>
+      prev.includes(companyId) ? prev.filter((id) => id !== companyId) : [...prev, companyId]
+    );
+  };
+
   const handleInvite = async () => {
-    if (!inviteCompanyId || !inviteEmail.trim()) return;
+    if (inviteCompanyIds.length === 0 || !inviteEmail.trim()) return;
     setSaving(true);
     setError('');
 
@@ -245,32 +255,34 @@ export default function TeamMembers() {
       return;
     }
 
-    const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-user`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          email: inviteEmail.trim().toLowerCase(),
-          username: inviteUsername.trim() || undefined,
-          fullName: inviteName.trim() || undefined,
-          companyId: inviteCompanyId,
-          role: inviteIsAdmin ? 'Admin' : 'User',
-          permissions: inviteIsAdmin ? [] : invitePermissions,
-          redirectUrl: window.location.origin,
-        }),
-      }
-    );
+    for (const companyId of inviteCompanyIds) {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-user`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            email: inviteEmail.trim().toLowerCase(),
+            username: inviteUsername.trim() || undefined,
+            fullName: inviteName.trim() || undefined,
+            companyId,
+            role: inviteIsAdmin ? 'Admin' : 'User',
+            permissions: inviteIsAdmin ? [] : (invitePermissions[companyId] || []),
+            redirectUrl: window.location.origin,
+          }),
+        }
+      );
 
-    const result = await response.json();
-    if (!response.ok) {
-      setError(result.error || 'Failed to invite user');
-      setSaving(false);
-      return;
+      const result = await response.json();
+      if (!response.ok) {
+        setError(result.error || 'Failed to invite user');
+        setSaving(false);
+        return;
+      }
     }
 
     setShowInviteModal(false);
@@ -309,13 +321,31 @@ export default function TeamMembers() {
 
   // ========== Edit User ==========
 
-  const openEditModal = (member: Member) => {
+  const openEditModal = async (member: Member) => {
     setEditTarget(member);
     setEditUsername(member.profile.username || '');
     setEditName(member.profile.full_name || '');
     setEditEmail(member.profile.email || '');
-    setEditIsAdmin(member.role === 'Admin');
     setEditError('');
+
+    const { data: memberships } = await supabase
+      .from('company_memberships')
+      .select('id, company_id, role')
+      .eq('user_id', member.user_id);
+
+    const access: Record<string, { exists: boolean; role: 'Admin' | 'User'; membershipId?: string; originalExists: boolean; originalRole?: 'Admin' | 'User' }> = {};
+    for (const c of adminCompanies) {
+      const existing = (memberships || []).find((m: any) => m.company_id === c.id);
+      const role: 'Admin' | 'User' = existing?.role === 'Admin' ? 'Admin' : 'User';
+      access[c.id] = {
+        exists: !!existing,
+        role,
+        membershipId: existing?.id,
+        originalExists: !!existing,
+        originalRole: existing ? role : undefined,
+      };
+    }
+    setEditCompanyAccess(access);
     setShowEditModal(true);
   };
 
@@ -334,10 +364,29 @@ export default function TeamMembers() {
       if (profileError) { setEditError(profileError.message); setEditSaving(false); return; }
     }
 
-    const newRole = editIsAdmin ? 'Admin' : 'User';
-    if (newRole !== editTarget.role) {
-      const { error: roleError } = await supabase.from('company_memberships').update({ role: newRole }).eq('id', editTarget.id);
-      if (roleError) { setEditError(roleError.message); setEditSaving(false); return; }
+    const selectedCount = Object.values(editCompanyAccess).filter((a) => a.exists).length;
+    if (selectedCount === 0) {
+      setEditError('User must belong to at least one company.');
+      setEditSaving(false);
+      return;
+    }
+
+    for (const [companyId, entry] of Object.entries(editCompanyAccess)) {
+      if (entry.exists && !entry.originalExists) {
+        const { error: insErr } = await supabase.from('company_memberships').insert({
+          company_id: companyId,
+          user_id: editTarget.user_id,
+          role: entry.role,
+          status: 'active',
+        });
+        if (insErr) { setEditError(insErr.message); setEditSaving(false); return; }
+      } else if (!entry.exists && entry.originalExists && entry.membershipId) {
+        const { error: delErr } = await supabase.from('company_memberships').delete().eq('id', entry.membershipId);
+        if (delErr) { setEditError(delErr.message); setEditSaving(false); return; }
+      } else if (entry.exists && entry.originalExists && entry.role !== entry.originalRole && entry.membershipId) {
+        const { error: upErr } = await supabase.from('company_memberships').update({ role: entry.role }).eq('id', entry.membershipId);
+        if (upErr) { setEditError(upErr.message); setEditSaving(false); return; }
+      }
     }
 
     setShowEditModal(false);
@@ -527,7 +576,7 @@ export default function TeamMembers() {
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">User Management</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Create and manage user accounts and their permissions</p>
           </div>
-          <Button onClick={() => { setShowInviteModal(true); setInviteCompanyId(activeCompany?.id || ''); }}>
+          <Button onClick={() => { setShowInviteModal(true); setInviteCompanyIds(adminCompanies.length === 1 ? [adminCompanies[0].id] : activeCompany ? [activeCompany.id] : []); }}>
             <UserPlus className="w-4 h-4" />
             Add User
           </Button>
@@ -681,12 +730,25 @@ export default function TeamMembers() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
                 <input type="text" value={inviteName} onChange={(e) => setInviteName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="Full name" />
               </div>
-              {adminCompanies.length > 1 && (
+              {adminCompanies.length > 1 ? (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company <span className="text-red-500">*</span></label>
-                  <CustomDropdown value={inviteCompanyId} onChange={(val) => setInviteCompanyId(val)} options={adminCompanies.map((c) => ({ value: c.id, label: c.name }))} placeholder="Select a company..." />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Companies <span className="text-red-500">*</span></label>
+                  <div className="border border-gray-200 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-600 max-h-48 overflow-y-auto">
+                    {adminCompanies.map((c) => {
+                      const checked = inviteCompanyIds.includes(c.id);
+                      return (
+                        <label key={c.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                          <input type="checkbox" checked={checked} onChange={() => toggleInviteCompany(c.id)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                          <span className="text-sm text-gray-900 dark:text-white">{c.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {inviteCompanyIds.length > 1 && !inviteIsAdmin && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Per-company permissions can be set after inviting from the edit screen.</p>
+                  )}
                 </div>
-              )}
+              ) : null}
               <label className="flex items-center gap-3 px-3 py-3 border border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                 <input type="checkbox" checked={inviteIsAdmin} onChange={(e) => setInviteIsAdmin(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                 <div>
@@ -696,8 +758,8 @@ export default function TeamMembers() {
               </label>
               <div className="flex justify-end gap-3 pt-4">
                 <Button variant="secondary" onClick={() => { setShowInviteModal(false); resetWizard(); }}>Cancel</Button>
-                <Button onClick={handleWizardNext} disabled={!inviteEmail.trim() || !inviteCompanyId}>
-                  {inviteIsAdmin ? 'Next: Send Invite' : 'Next: Set Permissions'}
+                <Button onClick={handleWizardNext} disabled={!inviteEmail.trim() || inviteCompanyIds.length === 0}>
+                  {skipPermissionsStep ? 'Next: Send Invite' : 'Next: Set Permissions'}
                 </Button>
               </div>
             </div>
@@ -709,10 +771,24 @@ export default function TeamMembers() {
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Set Permissions</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Step 2: Configure access for {inviteUsername || inviteEmail}</p>
               </div>
+              {inviteCompanyIds.length > 1 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Configure permissions for</label>
+                  <CustomDropdown
+                    value={invitePermCompanyId || inviteCompanyIds[0]}
+                    onChange={(val) => setInvitePermCompanyId(val)}
+                    options={inviteCompanyIds.map((id) => {
+                      const c = adminCompanies.find((ac) => ac.id === id);
+                      return { value: id, label: c?.name || id };
+                    })}
+                  />
+                </div>
+              )}
               <PermissionsPanel
-                companyId={inviteCompanyId}
-                permissions={invitePermissions}
-                onChange={setInvitePermissions}
+                key={invitePermCompanyId || inviteCompanyIds[0]}
+                companyId={invitePermCompanyId || inviteCompanyIds[0] || ''}
+                permissions={invitePermissions[invitePermCompanyId || inviteCompanyIds[0]] || []}
+                onChange={(perms) => setInvitePermissions((prev) => ({ ...prev, [invitePermCompanyId || inviteCompanyIds[0]]: perms }))}
               />
               <div className="flex justify-between pt-4">
                 <Button variant="secondary" onClick={handleWizardBack}>Back</Button>
@@ -751,12 +827,16 @@ export default function TeamMembers() {
                     {inviteIsAdmin ? 'Admin' : 'User'}
                   </span>
                 </div>
-                {!inviteIsAdmin && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500 dark:text-gray-400">Permissions:</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{invitePermissions.length} configured</span>
-                  </div>
-                )}
+                {!inviteIsAdmin && inviteCompanyIds.map((cid) => {
+                  const c = adminCompanies.find((ac) => ac.id === cid);
+                  const count = (invitePermissions[cid] || []).length;
+                  return (
+                    <div key={cid} className="flex justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Permissions{inviteCompanyIds.length > 1 ? ` (${c?.name || ''})` : ''}:</span>
+                      <span className="font-medium text-gray-900 dark:text-white">{count} configured</span>
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex justify-between pt-4">
                 <Button variant="secondary" onClick={handleWizardBack}>Back</Button>
@@ -786,13 +866,45 @@ export default function TeamMembers() {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
             <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="Email" />
           </div>
-          <label className="flex items-center gap-3 px-3 py-3 border border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            <input type="checkbox" checked={editIsAdmin} onChange={(e) => setEditIsAdmin(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-            <div>
-              <span className="text-sm font-medium text-gray-900 dark:text-white">Administrator</span>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Full access to all features and settings</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Company Access</label>
+            <div className="border border-gray-200 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-600 max-h-64 overflow-y-auto">
+              {adminCompanies.map((c) => {
+                const entry = editCompanyAccess[c.id];
+                if (!entry) return null;
+                return (
+                  <div key={c.id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={entry.exists}
+                        onChange={(e) => setEditCompanyAccess((prev) => ({
+                          ...prev,
+                          [c.id]: { ...prev[c.id], exists: e.target.checked },
+                        }))}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-900 dark:text-white">{c.name}</span>
+                    </label>
+                    {entry.exists && (
+                      <div className="w-32">
+                        <CustomDropdown
+                          value={entry.role}
+                          onChange={(val) => setEditCompanyAccess((prev) => ({
+                            ...prev,
+                            [c.id]: { ...prev[c.id], role: val as 'Admin' | 'User' },
+                          }))}
+                          options={[{ value: 'User', label: 'User' }, { value: 'Admin', label: 'Admin' }]}
+                          size="sm"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </label>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Uncheck a company to revoke access. Users must belong to at least one company.</p>
+          </div>
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => { setShowEditModal(false); setEditTarget(null); setEditError(''); }}>Cancel</Button>
             <Button onClick={handleEditSave} loading={editSaving}>Save Changes</Button>
