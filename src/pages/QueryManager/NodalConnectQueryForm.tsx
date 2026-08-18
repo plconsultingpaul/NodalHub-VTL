@@ -157,7 +157,8 @@ export default function NodalConnectQueryForm({
       const response = await proxyFetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        endpointId: nodalEndpoint.id,
       });
 
       if (!response.ok) {
@@ -190,6 +191,7 @@ export default function NodalConnectQueryForm({
             method: 'PUT',
             headers,
             body: JSON.stringify(inputs),
+            endpointId: nodalEndpoint.id,
           });
           const colData = await colResp.json();
           console.log('[detect-result-columns] PUT Response:', colResp.status, colData);
@@ -260,7 +262,7 @@ export default function NodalConnectQueryForm({
       try {
         const headers = getEndpointAuthHeaders(nodalEndpoint);
         const checkUrl = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(name.trim())}`;
-        const checkResp = await proxyFetch(checkUrl, { method: 'GET', headers });
+        const checkResp = await proxyFetch(checkUrl, { method: 'GET', headers, endpointId: nodalEndpoint.id });
         if (checkResp.ok) {
           setNameConflictChecking(false);
           setDetectError('An executable with this name already exists on NodalConnect');
@@ -316,7 +318,8 @@ export default function NodalConnectQueryForm({
       const ncResp = await proxyFetch(ncUrl, {
         method: ncMethod,
         headers,
-        body: JSON.stringify(ncBody)
+        body: JSON.stringify(ncBody),
+        endpointId: nodalEndpoint.id,
       });
 
       if (!ncResp.ok) {
@@ -380,6 +383,7 @@ export default function NodalConnectQueryForm({
         method: 'PUT',
         headers,
         body: JSON.stringify(inputs),
+        endpointId: nodalEndpoint.id,
       });
       const data = await response.json();
       console.log('[detect-result-columns] POST-save response:', response.status, data);
