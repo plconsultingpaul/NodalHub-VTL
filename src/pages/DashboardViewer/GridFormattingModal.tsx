@@ -14,13 +14,25 @@ export interface DrilldownDefinition {
   columns: string[];
 }
 
+export interface CellInfo {
+  id: string;
+  title: string;
+  columns: string[];
+  drilldowns: DrilldownDefinition[];
+}
+
 interface GridFormattingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (rules: GridCellFormattingRules) => void;
+  onSave: (rules: GridCellFormattingRules, cellId?: string) => void;
   columns: string[];
   initialRules: GridCellFormattingRules;
   drilldowns?: DrilldownDefinition[];
+  allCells?: CellInfo[];
+  activeCellId?: string | null;
+  onCellChange?: (cellId: string) => void;
+  getFormattingRulesForCell?: (cellId: string) => GridCellFormattingRules;
+  getDrilldownsForCell?: (cellId: string) => DrilldownDefinition[];
 }
 
 const FONT_FAMILIES = [
@@ -122,6 +134,11 @@ export default function GridFormattingModal({
   columns,
   initialRules,
   drilldowns = [],
+  allCells,
+  activeCellId,
+  onCellChange,
+  getFormattingRulesForCell,
+  getDrilldownsForCell,
 }: GridFormattingModalProps) {
   const [activeTab, setActiveTab] = useState<'basic' | 'conditional' | 'columnOrder'>('basic');
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget>({ type: 'grid' });
@@ -138,35 +155,51 @@ export default function GridFormattingModal({
   const drilldownDragItemRef = useRef<number | null>(null);
   const drilldownDragOverItemRef = useRef<number | null>(null);
   const prevIsOpenRef = useRef(false);
+  const prevCellIdRef = useRef<string | null | undefined>(null);
+
+  const initializeFromRules = (rules: GridCellFormattingRules, cols: string[], dds: DrilldownDefinition[]) => {
+    setFormattingRules(rules);
+    setSelectedTarget({ type: 'grid' });
+    const initialExpanded: Record<string, boolean> = {};
+    dds.forEach(d => { initialExpanded[d.id] = false; });
+    setExpandedDrilldowns(initialExpanded);
+    const savedOrder = rules.columnOrder || [];
+    const stillExisting = savedOrder.filter(c => cols.includes(c));
+    const newCols = cols.filter(c => !savedOrder.includes(c));
+    setColumnOrder(stillExisting.length > 0 ? [...stillExisting, ...newCols] : cols);
+    setHiddenColumns(rules.hiddenColumns || []);
+    setGroupBy(rules.groupBy || []);
+    const ddOrders: Record<string, string[]> = {};
+    const ddHidden: Record<string, string[]> = {};
+    dds.forEach(dd => {
+      const savedDdOrder = rules.drilldowns?.[dd.id]?.columnOrder || [];
+      const ddStillExisting = savedDdOrder.filter(c => dd.columns.includes(c));
+      const ddNewCols = dd.columns.filter(c => !savedDdOrder.includes(c));
+      ddOrders[dd.id] = ddStillExisting.length > 0 ? [...ddStillExisting, ...ddNewCols] : dd.columns;
+      ddHidden[dd.id] = rules.drilldowns?.[dd.id]?.hiddenColumns || [];
+    });
+    setDrilldownColumnOrders(ddOrders);
+    setDrilldownHiddenColumns(ddHidden);
+  };
 
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current) {
-      setFormattingRules(initialRules);
-      setSelectedTarget({ type: 'grid' });
-      const initialExpanded: Record<string, boolean> = {};
-      drilldowns.forEach(d => { initialExpanded[d.id] = false; });
-      setExpandedDrilldowns(initialExpanded);
-      const savedOrder = initialRules.columnOrder || [];
-      const stillExisting = savedOrder.filter(c => columns.includes(c));
-      const newColumns = columns.filter(c => !savedOrder.includes(c));
-      setColumnOrder(stillExisting.length > 0 ? [...stillExisting, ...newColumns] : columns);
-      setHiddenColumns(initialRules.hiddenColumns || []);
-      setGroupBy(initialRules.groupBy || []);
-      // Initialize drilldown column orders
-      const ddOrders: Record<string, string[]> = {};
-      const ddHidden: Record<string, string[]> = {};
-      drilldowns.forEach(dd => {
-        const savedDdOrder = initialRules.drilldowns?.[dd.id]?.columnOrder || [];
-        const ddStillExisting = savedDdOrder.filter(c => dd.columns.includes(c));
-        const ddNewCols = dd.columns.filter(c => !savedDdOrder.includes(c));
-        ddOrders[dd.id] = ddStillExisting.length > 0 ? [...ddStillExisting, ...ddNewCols] : dd.columns;
-        ddHidden[dd.id] = initialRules.drilldowns?.[dd.id]?.hiddenColumns || [];
-      });
-      setDrilldownColumnOrders(ddOrders);
-      setDrilldownHiddenColumns(ddHidden);
+      initializeFromRules(initialRules, columns, drilldowns);
     }
     prevIsOpenRef.current = isOpen;
   }, [isOpen, initialRules, drilldowns, columns]);
+
+  useEffect(() => {
+    if (isOpen && activeCellId && activeCellId !== prevCellIdRef.current && prevCellIdRef.current !== null) {
+      const cellInfo = allCells?.find(c => c.id === activeCellId);
+      if (cellInfo && getFormattingRulesForCell) {
+        const rules = getFormattingRulesForCell(activeCellId);
+        const dds = getDrilldownsForCell ? getDrilldownsForCell(activeCellId) : cellInfo.drilldowns;
+        initializeFromRules(rules, cellInfo.columns, dds);
+      }
+    }
+    prevCellIdRef.current = activeCellId;
+  }, [isOpen, activeCellId, allCells, getFormattingRulesForCell, getDrilldownsForCell]);
 
   const currentFormatting = useMemo((): GridColumnFormatting => {
     if (selectedTarget.type === 'grid') {
@@ -296,8 +329,32 @@ export default function GridFormattingModal({
       groupBy: groupBy.length > 0 ? groupBy : undefined,
       drilldowns: Object.keys(mergedDrilldowns).length > 0 ? mergedDrilldowns : undefined,
     };
-    onSave(rulesToSave);
+    onSave(rulesToSave, activeCellId || undefined);
     onClose();
+  };
+
+  const handleSaveAndSwitchCell = (newCellId: string) => {
+    const mergedDrilldowns = { ...(formattingRules.drilldowns || {}) };
+    drilldowns.forEach(dd => {
+      const order = drilldownColumnOrders[dd.id];
+      const hidden = drilldownHiddenColumns[dd.id];
+      if (order || hidden) {
+        mergedDrilldowns[dd.id] = {
+          ...(mergedDrilldowns[dd.id] || {}),
+          columnOrder: order && order.length > 0 ? order : undefined,
+          hiddenColumns: hidden && hidden.length > 0 ? hidden : undefined,
+        };
+      }
+    });
+    const rulesToSave: GridCellFormattingRules = {
+      ...formattingRules,
+      columnOrder,
+      hiddenColumns: hiddenColumns.length > 0 ? hiddenColumns : undefined,
+      groupBy: groupBy.length > 0 ? groupBy : undefined,
+      drilldowns: Object.keys(mergedDrilldowns).length > 0 ? mergedDrilldowns : undefined,
+    };
+    onSave(rulesToSave, activeCellId || undefined);
+    if (onCellChange) onCellChange(newCellId);
   };
 
   const getPreviewStyle = (): React.CSSProperties => {
@@ -333,6 +390,18 @@ export default function GridFormattingModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Grid Formatting" size="4xl">
       <div className="flex flex-col h-[700px]">
+        {allCells && allCells.length > 1 && (
+          <div className="mb-3">
+            <CustomDropdown
+              value={activeCellId || ''}
+              onChange={(val) => {
+                if (val !== activeCellId) handleSaveAndSwitchCell(val);
+              }}
+              options={allCells.map(c => ({ value: c.id, label: c.title || 'Untitled Cell' }))}
+              placeholder="Select cell"
+            />
+          </div>
+        )}
         <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
           <button
             onClick={() => setActiveTab('basic')}
@@ -761,6 +830,28 @@ export default function GridFormattingModal({
                       </div>
                     </div>
                   )}
+                </div>
+                )}
+
+                {(selectedTarget.type === 'column' || selectedTarget.type === 'drilldown-column') && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Auto Summary
+                  </label>
+                  <CustomDropdown
+                    value={currentFormatting.bottomCalc || ''}
+                    onChange={(val) => updateFormatting({ bottomCalc: (val || undefined) as GridColumnFormatting['bottomCalc'] })}
+                    options={[
+                      { value: '', label: 'None' },
+                      { value: 'avg', label: 'Average' },
+                      { value: 'count', label: 'Count' },
+                      { value: 'max', label: 'Maximum' },
+                      { value: 'min', label: 'Minimum' },
+                      { value: 'sum', label: 'Sum' },
+                    ]}
+                    placeholder="None"
+                    size="sm"
+                  />
                 </div>
                 )}
 
