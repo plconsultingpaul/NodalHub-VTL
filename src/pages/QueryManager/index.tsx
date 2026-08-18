@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
-import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus, ScrollText } from 'lucide-react';
+import { Plus, Pencil, Trash2, Database, Globe, FileCode, Play, Loader2, CheckCircle, XCircle, Copy, Hash, AlertTriangle, Download, RefreshCw, ChevronDown, ChevronRight, LayoutDashboard, FolderPlus, ScrollText, Search, X } from 'lucide-react';
 import { useQueries } from '../../hooks/useQueries';
 import { useEndpoints } from '../../hooks/useEndpoints';
 import { useAuth } from '../../contexts/AuthContext';
@@ -75,6 +75,7 @@ export default function QueryManager() {
   const [testParamValues, setTestParamValues] = useState<Record<string, string>>({});
   const [purposeTypeFilter, setPurposeTypeFilter] = useState<'all' | QueryPurposeType>('all');
   const [appTargetFilter, setAppTargetFilter] = useState<'all' | QueryAppTarget>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [refreshingQueryId, setRefreshingQueryId] = useState<string | null>(null);
   const [testResponseExpanded, setTestResponseExpanded] = useState(false);
@@ -117,8 +118,15 @@ export default function QueryManager() {
     if (appTargetFilter !== 'all') {
       result = result.filter(q => q.app_target === appTargetFilter || q.app_target === 'both');
     }
+    const trimmed = searchTerm.trim().toLowerCase();
+    if (trimmed) {
+      result = result.filter(q =>
+        (q.name || '').toLowerCase().includes(trimmed) ||
+        (q.sql_query_text || '').toLowerCase().includes(trimmed)
+      );
+    }
     return result;
-  }, [queries, purposeTypeFilter, appTargetFilter]);
+  }, [queries, purposeTypeFilter, appTargetFilter, searchTerm]);
 
   const dashboardFolders = useMemo(() =>
     projects.filter(p => p.type === 'dashboards'),
@@ -425,7 +433,7 @@ export default function QueryManager() {
         }
 
         const url = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(queryToDelete.name)}`;
-        const response = await proxyFetch(url, { method: 'DELETE', headers });
+        const response = await proxyFetch(url, { method: 'DELETE', headers, endpointId: nodalEndpoint.id });
 
         if (!response.ok && response.status !== 404) {
           setDeleteWarning('NodalConnect executable could not be removed, but local query was deleted.');
@@ -597,7 +605,8 @@ export default function QueryManager() {
         const response = await proxyFetch(url, {
           method: 'POST',
           headers,
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          endpointId: nodalEndpoint.id,
         });
 
         const data = await response.json();
@@ -703,6 +712,7 @@ export default function QueryManager() {
         method: query.http_method,
         headers,
         body: fetchOptions.body as string | undefined,
+        endpointId: query.api_endpoint_id,
       });
       const data = await response.json();
 
@@ -881,7 +891,7 @@ export default function QueryManager() {
       }
 
       const url = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage/${encodeURIComponent(query.name)}`;
-      const response = await proxyFetch(url, { method: 'GET', headers });
+      const response = await proxyFetch(url, { method: 'GET', headers, endpointId: nodalEndpoint.id });
 
       if (!response.ok) return;
 
@@ -943,6 +953,26 @@ export default function QueryManager() {
           subtitle="Create and manage your data queries"
           actions={
             <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by name or SQL..."
+                  className="w-64 pl-9 pr-9 py-1.5 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded"
+                    aria-label="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               <CustomDropdown
                 value={purposeTypeFilter}
                 onChange={(val) => setPurposeTypeFilter(val as 'all' | QueryPurposeType)}
