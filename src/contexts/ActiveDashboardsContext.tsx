@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import type { Dashboard } from '../types/database';
+import { useAuth } from './AuthContext';
 
 interface OpenDashboard {
   dashboard: Dashboard;
@@ -40,6 +41,24 @@ export function ActiveDashboardsProvider({ children }: { children: ReactNode }) 
   const [isPulseBuilderOpen, setIsPulseBuilderOpen] = useState(false);
   const [pulseBuilderProjectId, setPulseBuilderProjectId] = useState<string | null>(null);
   const [pulseBuilderPulseId, setPulseBuilderPulseId] = useState<string | null>(null);
+
+  const { activeCompany } = useAuth();
+  const prevCompanyIdRef = useRef(activeCompany?.id);
+
+  useEffect(() => {
+    if (activeCompany?.id && activeCompany.id !== prevCompanyIdRef.current) {
+      setOpenDashboards([]);
+      setActiveDashboardIdState(null);
+      setIsBuilderOpen(false);
+      setBuilderProjectId(null);
+      setBuilderDashboardId(null);
+      setBuilderInitialName(null);
+      setIsPulseBuilderOpen(false);
+      setPulseBuilderProjectId(null);
+      setPulseBuilderPulseId(null);
+    }
+    prevCompanyIdRef.current = activeCompany?.id;
+  }, [activeCompany?.id]);
 
   const openDashboard = useCallback((dashboard: Dashboard, viewOnly?: boolean) => {
     setOpenDashboards(prev => {
