@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown, Smartphone } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown, Smartphone, ShieldAlert } from 'lucide-react';
 import { useCellActions } from '../../hooks/useCellActions';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { usePulses } from '../../hooks/usePulses';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import CustomDropdown from '../../components/ui/CustomDropdown';
-import type { QueryWithRelations, UserParameter, ActionParameterMapping, ActionMappingValueType, ActionType, PulseVariableMapping, ActionVisibilityCondition, ActionVisibilityOperator } from '../../types/database';
+import type { QueryWithRelations, UserParameter, ActionParameterMapping, ActionMappingValueType, ActionType, PulseVariableMapping, ActionVisibilityCondition, ActionVisibilityOperator, ActionOptionsFilter } from '../../types/database';
 
 interface ActionConfig {
   id?: string;
@@ -25,6 +25,8 @@ interface ActionConfig {
   prompt_title?: string;
   prompt_description?: string;
   show_on_mobile: boolean;
+  requires_confirmation: boolean;
+  confirmation_message: string;
 }
 
 interface ActionsConfigModalProps {
@@ -33,6 +35,7 @@ interface ActionsConfigModalProps {
   cellId: string | undefined;
   queries: QueryWithRelations[];
   availableColumns: string[];
+  dashboardParameters?: string[];
 }
 
 export default function ActionsConfigModal({
@@ -41,6 +44,7 @@ export default function ActionsConfigModal({
   cellId,
   queries,
   availableColumns,
+  dashboardParameters = [],
 }: ActionsConfigModalProps) {
   const { fetchActionsForCell, saveActions, loading: saving } = useCellActions();
   const { fixedValues } = useFixedValues();
@@ -94,6 +98,8 @@ export default function ActionsConfigModal({
           prompt_title: a.prompt_title || '',
           prompt_description: a.prompt_description || '',
           show_on_mobile: a.show_on_mobile ?? true,
+          requires_confirmation: a.requires_confirmation ?? false,
+          confirmation_message: a.confirmation_message ?? '',
         };
       }));
       setLoadingActions(false);
@@ -120,6 +126,8 @@ export default function ActionsConfigModal({
           pulse_variable_mappings: [],
           visibility_condition: null,
           show_on_mobile: true,
+          requires_confirmation: false,
+          confirmation_message: '',
         }
       ];
       setSelectedIndex(newActions.length - 1);
@@ -191,10 +199,22 @@ export default function ActionsConfigModal({
         isPathVariable: true,
       }));
 
+    const queryParams = (query?.query_parameters as Array<{ key: string; enabled: boolean; isCustom?: boolean }> | null) || [];
+    const customQueryParamMappings: ActionParameterMapping[] = queryParams
+      .filter(p => p.isCustom && p.enabled && p.key)
+      .map(p => ({
+        parameterName: p.key,
+        target: 'column' as const,
+        columnName: '',
+        hardcodeValue: '',
+        valueType: 'text' as const,
+        isCustomQueryParam: true,
+      }));
+
     handleUpdateAction(index, {
       query_id: queryId,
       display_name: query?.name || '',
-      parameter_mappings: [...mappings, ...pathVarMappings],
+      parameter_mappings: [...mappings, ...pathVarMappings, ...customQueryParamMappings],
     });
   };
 
@@ -269,6 +289,14 @@ export default function ActionsConfigModal({
     handleUpdateAction(actionIndex, { parameter_mappings: updated });
   };
 
+  const handleMappingOptionsFilterChange = (actionIndex: number, paramName: string, optionsFilter: ActionOptionsFilter | undefined) => {
+    const action = actions[actionIndex];
+    const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
+      m.parameterName === paramName ? { ...m, optionsFilter } : m
+    );
+    handleUpdateAction(actionIndex, { parameter_mappings: updated });
+  };
+
   const handleMappingUserFieldChange = (actionIndex: number, paramName: string, userField: 'username' | 'full_name') => {
     const action = actions[actionIndex];
     const updated = ensureMapping(action.parameter_mappings, paramName).map(m =>
@@ -284,24 +312,32 @@ export default function ActionsConfigModal({
     setShowFieldPicker(true);
   };
 
-  const handleFieldSelect = (field: string) => {
+  const handleFieldSelect = (field: string, isDashboardParam = false) => {
     if (activeActionIndex !== null && activeParamName !== null) {
       if (activeParamName.startsWith('__pulse_var_idx__')) {
         const varIndex = parseInt(activeParamName.replace('__pulse_var_idx__', ''), 10);
         const action = actions[activeActionIndex];
         const updated = (action.pulse_variable_mappings || []).map((m, i) =>
-          i === varIndex ? { ...m, sourceValue: field } : m
+          i === varIndex
+            ? { ...m, source: (isDashboardParam ? 'dashboard_param' : 'column') as PulseVariableMapping['source'], sourceValue: field }
+            : m
         );
         handleUpdateAction(activeActionIndex, { pulse_variable_mappings: updated });
       } else if (activeParamName.startsWith('__pulse_var__')) {
         const varName = activeParamName.replace('__pulse_var__', '');
         const action = actions[activeActionIndex];
         const updated = (action.pulse_variable_mappings || []).map(m =>
-          m.variableName === varName ? { ...m, sourceValue: field } : m
+          m.variableName === varName
+            ? { ...m, source: (isDashboardParam ? 'dashboard_param' : 'column') as PulseVariableMapping['source'], sourceValue: field }
+            : m
         );
         const hasVar = updated.some(m => m.variableName === varName);
         if (!hasVar) {
-          updated.push({ variableName: varName, source: 'column', sourceValue: field });
+          updated.push({
+            variableName: varName,
+            source: isDashboardParam ? 'dashboard_param' : 'column',
+            sourceValue: field,
+          });
         }
         handleUpdateAction(activeActionIndex, { pulse_variable_mappings: updated });
       } else {
@@ -360,8 +396,18 @@ export default function ActionsConfigModal({
     return field.toLowerCase().includes(fieldPickerSearch.toLowerCase());
   });
 
+  const isPulseVarFieldPicker = activeParamName !== null && (
+    activeParamName.startsWith('__pulse_var_idx__') || activeParamName.startsWith('__pulse_var__')
+  );
+  const filteredDashboardParams = isPulseVarFieldPicker
+    ? dashboardParameters.filter(p => {
+        if (!fieldPickerSearch.trim()) return true;
+        return p.toLowerCase().includes(fieldPickerSearch.toLowerCase());
+      })
+    : [];
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Cell Actions" size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Cell Actions" size="2xl">
       <div className="space-y-3">
         {!cellId && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
@@ -434,9 +480,11 @@ export default function ActionsConfigModal({
                             ? 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/30'
                             : action.action_type === 'link'
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
-                              : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                              : action.action_type === 'run_report'
+                                ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
+                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : 'Exe'}
+                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : 'Exe'}
                         </span>
                         <span className="text-xs text-gray-700 dark:text-gray-300 truncate">
                           {action.display_name || '(unnamed)'}
@@ -462,9 +510,11 @@ export default function ActionsConfigModal({
                             ? 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/30'
                             : action.action_type === 'link'
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
-                              : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                              : action.action_type === 'run_report'
+                                ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
+                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : 'Exe'}
+                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : 'Exe'}
                         </span>
                         <span className="text-xs text-gray-700 dark:text-gray-300 truncate">
                           {action.display_name || '(unnamed)'}
@@ -531,9 +581,11 @@ export default function ActionsConfigModal({
                             ? 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/30'
                             : action.action_type === 'link'
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
-                              : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                              : action.action_type === 'run_report'
+                                ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
+                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Popup' : action.action_type === 'link' ? 'Link' : 'Execute'}
+                          {action.action_type === 'popup' ? 'Popup' : action.action_type === 'link' ? 'Link' : action.action_type === 'run_report' ? 'Run Report' : 'Execute'}
                         </span>
                         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                           {action.display_name || `Action ${index + 1}`}
@@ -566,6 +618,7 @@ export default function ActionsConfigModal({
                             })}
                             options={[
                               { value: 'execute', label: 'Execute (API Call)' },
+                              { value: 'run_report', label: 'Run Report (Open PDF)' },
                               { value: 'popup', label: 'Popup (Display Info)' },
                               { value: 'link', label: 'Link (Open URL)' },
                             ]}
@@ -602,7 +655,7 @@ export default function ActionsConfigModal({
                         />
                       </div>
 
-                      {action.action_type === 'execute' && (
+                      {(action.action_type === 'execute' || action.action_type === 'run_report') && (
                         <>
                           <div>
                             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
@@ -682,7 +735,7 @@ export default function ActionsConfigModal({
 
                               const handlePulseVarSourceChange = (varIndex: number, source: string) => {
                                 const updated = mappings.map((m, i) =>
-                                  i === varIndex ? { ...m, source: source as 'column' | 'hardcode' | 'prompt' | 'current_user', sourceValue: source === 'current_user' ? 'full_name' : '' } : m
+                                  i === varIndex ? { ...m, source: source as PulseVariableMapping['source'], sourceValue: source === 'current_user' ? 'full_name' : '' } : m
                                 );
                                 handleUpdateAction(index, { pulse_variable_mappings: updated });
                               };
@@ -728,7 +781,7 @@ export default function ActionsConfigModal({
                                             placeholder="VAR_NAME"
                                           />
                                           <span className="text-xs text-gray-400 shrink-0">&rarr;</span>
-                                          <div className="w-24 shrink-0">
+                                          <div className="w-40 shrink-0">
                                             <CustomDropdown
                                               value={mapping.source}
                                               onChange={(val) => handlePulseVarSourceChange(varIndex, val)}
@@ -737,10 +790,40 @@ export default function ActionsConfigModal({
                                                 { value: 'hardcode', label: 'Hardcode' },
                                                 { value: 'prompt', label: 'Prompt' },
                                                 { value: 'current_user', label: 'Current User' },
+                                                ...(dashboardParameters.length > 0
+                                                  ? [{ value: 'dashboard_param', label: 'Dashboard Param' }]
+                                                  : []),
                                               ]}
                                               size="sm"
                                             />
                                           </div>
+                                          {mapping.source === 'dashboard_param' && (
+                                            <>
+                                              <div className="flex-1">
+                                                <CustomDropdown
+                                                  value={mapping.sourceValue}
+                                                  onChange={(val) => handlePulseVarValueChange(varIndex, val)}
+                                                  options={dashboardParameters.map(p => ({ value: p, label: p }))}
+                                                  placeholder="Select dashboard parameter"
+                                                  size="sm"
+                                                />
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setActiveActionIndex(index);
+                                                  setActiveParamName(`__pulse_var_idx__${varIndex}`);
+                                                  setFieldPickerSearch('');
+                                                  setShowFieldPicker(true);
+                                                }}
+                                                disabled={availableColumns.length === 0 && dashboardParameters.length === 0}
+                                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                                                title="Pick column or parameter"
+                                              >
+                                                <Braces className="w-3.5 h-3.5" />
+                                              </button>
+                                            </>
+                                          )}
                                           {mapping.source === 'column' && (
                                             <>
                                               <div className="flex-1">
@@ -823,7 +906,7 @@ export default function ActionsConfigModal({
                           </div>
 
                           {/* Prompt Dialog Customization */}
-                          {(action.action_type === 'execute') && (
+                          {(action.action_type === 'execute' || action.action_type === 'run_report') && (
                             <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                                 Prompt Dialog <span className="font-normal text-gray-400">(optional)</span>
@@ -1022,6 +1105,121 @@ export default function ActionsConfigModal({
                                           />
                                         </div>
                                       )}
+                                      {currentTarget === 'fixed_value' && mapping?.fixedValueId && (() => {
+                                        const childFv = fixedValues.find(f => f.id === mapping.fixedValueId);
+                                        if (!childFv?.is_list) return null;
+                                        const paramIndex = userParams.findIndex(p => p.name === param.name);
+                                        const eligibleParents = userParams.slice(0, paramIndex).filter(p => {
+                                          const pm = action.parameter_mappings.find(x => x.parameterName === p.name);
+                                          if (!pm || pm.target !== 'fixed_value' || !pm.fixedValueId) return false;
+                                          const pfv = fixedValues.find(f => f.id === pm.fixedValueId);
+                                          return !!pfv?.is_list;
+                                        });
+                                        if (eligibleParents.length === 0) return null;
+                                        const filter = mapping.optionsFilter;
+                                        const parentMapping = filter?.parentParameterName
+                                          ? action.parameter_mappings.find(x => x.parameterName === filter.parentParameterName)
+                                          : null;
+                                        const parentFv = parentMapping?.fixedValueId
+                                          ? fixedValues.find(f => f.id === parentMapping.fixedValueId)
+                                          : null;
+                                        const childItems = childFv.list_values || [];
+                                        return (
+                                          <div className="ml-[calc(7rem+2.5rem)] mt-2 p-2 border border-blue-200 dark:border-blue-800 rounded bg-blue-50/40 dark:bg-blue-900/10">
+                                            <div className="flex items-center gap-2 mb-2">
+                                              <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={!!filter}
+                                                  onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                      handleMappingOptionsFilterChange(index, param.name, {
+                                                        parentParameterName: eligibleParents[0].name,
+                                                        rules: [],
+                                                      });
+                                                    } else {
+                                                      handleMappingOptionsFilterChange(index, param.name, undefined);
+                                                    }
+                                                  }}
+                                                  className="w-3.5 h-3.5"
+                                                />
+                                                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                                  Filter options based on another parameter
+                                                </span>
+                                              </label>
+                                            </div>
+                                            {filter && (
+                                              <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-xs text-gray-600 dark:text-gray-400 w-20 shrink-0">Depends on</span>
+                                                  <div className="flex-1">
+                                                    <CustomDropdown
+                                                      value={filter.parentParameterName}
+                                                      onChange={(val) => handleMappingOptionsFilterChange(index, param.name, { ...filter, parentParameterName: val, rules: [] })}
+                                                      options={eligibleParents.map(p => ({ value: p.name, label: p.name }))}
+                                                      size="sm"
+                                                    />
+                                                  </div>
+                                                </div>
+                                                {parentFv && (parentFv.list_values || []).length > 0 && (
+                                                  <div className="space-y-1.5">
+                                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                                      For each parent value, pick which child options to show.
+                                                    </p>
+                                                    {(parentFv.list_values || []).map(parentItem => {
+                                                      const rule = filter.rules.find(r => r.parentValue === parentItem.value);
+                                                      const allowed = rule?.allowedValues || [];
+                                                      const toggle = (childValue: string) => {
+                                                        const nextAllowed = allowed.includes(childValue)
+                                                          ? allowed.filter(v => v !== childValue)
+                                                          : [...allowed, childValue];
+                                                        const otherRules = filter.rules.filter(r => r.parentValue !== parentItem.value);
+                                                        const newRules = nextAllowed.length > 0
+                                                          ? [...otherRules, { parentValue: parentItem.value, allowedValues: nextAllowed }]
+                                                          : otherRules;
+                                                        handleMappingOptionsFilterChange(index, param.name, { ...filter, rules: newRules });
+                                                      };
+                                                      return (
+                                                        <div key={parentItem.value} className="flex items-start gap-2 py-1 border-t border-blue-100 dark:border-blue-900/40 first:border-t-0 first:pt-0">
+                                                          <span className="text-xs font-mono text-blue-700 dark:text-blue-300 w-24 shrink-0 truncate" title={parentItem.value}>
+                                                            {parentItem.value}
+                                                          </span>
+                                                          <span className="text-xs text-gray-400 shrink-0">&rarr;</span>
+                                                          <div className="flex-1 flex flex-wrap gap-1.5">
+                                                            {childItems.length === 0 ? (
+                                                              <span className="text-xs text-gray-400 italic">No child options</span>
+                                                            ) : childItems.map(childItem => {
+                                                              const checked = allowed.includes(childItem.value);
+                                                              return (
+                                                                <label
+                                                                  key={childItem.value}
+                                                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border cursor-pointer transition-colors ${
+                                                                    checked
+                                                                      ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200'
+                                                                      : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400'
+                                                                  }`}
+                                                                >
+                                                                  <input
+                                                                    type="checkbox"
+                                                                    checked={checked}
+                                                                    onChange={() => toggle(childItem.value)}
+                                                                    className="w-3 h-3"
+                                                                  />
+                                                                  <span className="font-mono">{childItem.value}</span>
+                                                                </label>
+                                                              );
+                                                            })}
+                                                          </div>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   );
                                 })}
@@ -1049,6 +1247,145 @@ export default function ActionsConfigModal({
                                       <div className="flex items-center gap-2">
                                         <span className="inline-flex items-center gap-1 text-xs font-mono w-28 shrink-0">
                                           <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-700">
+                                            {mapping.parameterName}
+                                          </span>
+                                        </span>
+                                        <span className="text-xs text-gray-400 shrink-0">&rarr;</span>
+                                        <div className="w-32 shrink-0">
+                                          <CustomDropdown
+                                            value={currentTarget}
+                                            onChange={(val) => handleMappingTargetChange(index, mapping.parameterName, val as 'column' | 'hardcode' | 'prompt' | 'lookup' | 'fixed_value' | 'user')}
+                                            options={[
+                                              { value: 'column', label: 'Column' },
+                                              { value: 'hardcode', label: 'Hardcode' },
+                                              { value: 'prompt', label: 'Prompt' },
+                                              { value: 'lookup', label: 'Lookup' },
+                                              { value: 'fixed_value', label: 'Fixed Value' },
+                                              { value: 'user', label: 'User' },
+                                            ]}
+                                            size="sm"
+                                          />
+                                        </div>
+                                        {currentTarget === 'lookup' && (
+                                          <div className="flex-1">
+                                            <CustomDropdown
+                                              value={mapping.lookupQueryId || ''}
+                                              onChange={(val) => handleMappingLookupQueryChange(index, mapping.parameterName, val)}
+                                              options={lookupQueries.map(q => ({ value: q.id, label: q.name }))}
+                                              placeholder="Select lookup query..."
+                                              size="sm"
+                                            />
+                                          </div>
+                                        )}
+                                        {currentTarget === 'column' && (
+                                          <>
+                                            <div className="flex-1">
+                                              <CustomDropdown
+                                                value={currentColumn}
+                                                onChange={(val) => handleMappingChange(index, mapping.parameterName, val)}
+                                                options={availableColumns.map(col => ({ value: col, label: col }))}
+                                                placeholder="Select column"
+                                                size="sm"
+                                              />
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => openFieldPicker(index, mapping.parameterName)}
+                                              disabled={availableColumns.length === 0}
+                                              className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                                              title="Pick column"
+                                            >
+                                              <Braces className="w-4 h-4" />
+                                            </button>
+                                          </>
+                                        )}
+                                        {currentTarget === 'hardcode' && (
+                                          <div className="flex-1">
+                                            <input
+                                              type="text"
+                                              value={currentHardcode}
+                                              onChange={(e) => handleMappingHardcodeChange(index, mapping.parameterName, e.target.value)}
+                                              className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                              placeholder="Enter value"
+                                            />
+                                          </div>
+                                        )}
+                                        {currentTarget === 'prompt' && (
+                                          <div className="flex-1">
+                                            <input
+                                              type="text"
+                                              value={mapping.promptText || ''}
+                                              onChange={(e) => handleMappingPromptTextChange(index, mapping.parameterName, e.target.value)}
+                                              className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                              placeholder="Prompt text shown to user"
+                                            />
+                                          </div>
+                                        )}
+                                        {currentTarget === 'fixed_value' && (
+                                          <div className="flex-1">
+                                            <CustomDropdown
+                                              value={mapping.fixedValueId || ''}
+                                              onChange={(val) => handleMappingFixedValueIdChange(index, mapping.parameterName, val)}
+                                              options={fixedValues.map(fv => ({ value: fv.id, label: `# ${fv.name}` }))}
+                                              placeholder="Select fixed value..."
+                                              size="sm"
+                                              searchable
+                                            />
+                                          </div>
+                                        )}
+                                        {currentTarget === 'user' && (
+                                          <div className="flex-1">
+                                            <CustomDropdown
+                                              value={mapping.userField || 'username'}
+                                              onChange={(val) => handleMappingUserFieldChange(index, mapping.parameterName, val as 'username' | 'full_name')}
+                                              options={[
+                                                { value: 'username', label: 'Username' },
+                                                { value: 'full_name', label: 'Name' },
+                                              ]}
+                                              placeholder="Select user field..."
+                                              size="sm"
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                      {(currentTarget === 'lookup' || (currentTarget === 'fixed_value' && mapping.fixedValueId && (() => { const fv = fixedValues.find(f => f.id === mapping.fixedValueId); return fv?.is_list || fv?.value_type === 'lookup'; })())) && (
+                                        <div className="ml-[calc(7rem+2.5rem)] mt-1">
+                                          <input
+                                            type="text"
+                                            value={mapping.promptText || ''}
+                                            onChange={(e) => handleMappingPromptTextChange(index, mapping.parameterName, e.target.value)}
+                                            className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                            placeholder="Display label (e.g. Select Driver)"
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Query Parameter Mappings (custom query params) */}
+                          {action.parameter_mappings.filter(m => m.isCustomQueryParam).length > 0 && (
+                            <div className="pt-2 border-t border-teal-200 dark:border-teal-800">
+                              <label className="block text-xs font-medium text-teal-700 dark:text-teal-400 mb-2">
+                                Query Parameter Mappings
+                              </label>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                Map custom query parameters to grid columns or values.
+                              </p>
+                              <div className="space-y-2">
+                                {action.parameter_mappings.filter(m => m.isCustomQueryParam).map(mapping => {
+                                  const currentTarget = mapping.target || 'column';
+                                  const currentColumn = mapping.columnName || '';
+                                  const currentHardcode = mapping.hardcodeValue || '';
+
+                                  return (
+                                    <div key={`qp-${mapping.parameterName}`} className="space-y-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="inline-flex items-center gap-1 text-xs font-mono w-28 shrink-0">
+                                          <span className="px-1.5 py-0.5 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200 dark:border-teal-700 truncate">
                                             {mapping.parameterName}
                                           </span>
                                         </span>
@@ -1442,6 +1779,37 @@ export default function ActionsConfigModal({
                           <span className="text-xs text-gray-600 dark:text-gray-400">Show this action in the mobile app</span>
                         </label>
                       </div>
+
+                      {/* Confirmation Prompt */}
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                          <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+                          Confirmation Prompt
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={action.requires_confirmation}
+                            onChange={(e) => handleUpdateAction(index, { requires_confirmation: e.target.checked })}
+                            className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500"
+                          />
+                          <span className="text-xs text-gray-600 dark:text-gray-400">Ask “Are you sure?” before running this action</span>
+                        </label>
+                        {action.requires_confirmation && (
+                          <div className="mt-2">
+                            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                              Confirmation message (optional)
+                            </label>
+                            <textarea
+                              value={action.confirmation_message}
+                              onChange={(e) => handleUpdateAction(index, { confirmation_message: e.target.value })}
+                              placeholder={`Are you sure you want to run “${action.display_name || 'this action'}”?`}
+                              rows={2}
+                              className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1468,7 +1836,7 @@ export default function ActionsConfigModal({
             <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
               <h4 className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
                 <Braces className="w-4 h-4" />
-                Select Column
+                {isPulseVarFieldPicker ? 'Select Column or Parameter' : 'Select Column'}
               </h4>
               <button
                 onClick={() => {
@@ -1489,7 +1857,7 @@ export default function ActionsConfigModal({
                   type="text"
                   value={fieldPickerSearch}
                   onChange={(e) => setFieldPickerSearch(e.target.value)}
-                  placeholder="Search columns..."
+                  placeholder={isPulseVarFieldPicker ? 'Search columns or parameters...' : 'Search columns...'}
                   className="w-full pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm"
                   autoFocus
                 />
@@ -1497,19 +1865,47 @@ export default function ActionsConfigModal({
             </div>
 
             <div className="max-h-64 overflow-y-auto">
-              {filteredFields.length === 0 ? (
-                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">No matching columns found</p>
+              {filteredFields.length === 0 && filteredDashboardParams.length === 0 ? (
+                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">No matching items found</p>
               ) : (
-                filteredFields.map((field) => (
-                  <button
-                    key={field}
-                    type="button"
-                    onClick={() => handleFieldSelect(field)}
-                    className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                  >
-                    <span className="font-mono text-sm text-gray-900 dark:text-white">{field}</span>
-                  </button>
-                ))
+                <>
+                  {filteredFields.length > 0 && (
+                    <>
+                      {isPulseVarFieldPicker && (
+                        <div className="px-4 py-1.5 bg-gray-50 dark:bg-gray-700/50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                          Columns
+                        </div>
+                      )}
+                      {filteredFields.map((field) => (
+                        <button
+                          key={`col-${field}`}
+                          type="button"
+                          onClick={() => handleFieldSelect(field)}
+                          className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                        >
+                          <span className="font-mono text-sm text-gray-900 dark:text-white">{field}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {isPulseVarFieldPicker && filteredDashboardParams.length > 0 && (
+                    <>
+                      <div className="px-4 py-1.5 bg-gray-50 dark:bg-gray-700/50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-t border-gray-200 dark:border-gray-700">
+                        Dashboard Parameters
+                      </div>
+                      {filteredDashboardParams.map((param) => (
+                        <button
+                          key={`param-${param}`}
+                          type="button"
+                          onClick={() => handleFieldSelect(param, true)}
+                          className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                        >
+                          <span className="font-mono text-sm text-gray-900 dark:text-white">{param}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </>
               )}
             </div>
           </div>
