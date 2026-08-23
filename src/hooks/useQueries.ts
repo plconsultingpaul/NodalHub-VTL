@@ -12,6 +12,7 @@ export interface QueryParameter {
   example: string | null;
   enabled: boolean;
   required: boolean;
+  isCustom?: boolean;
 }
 
 const encodeParamValue = (key: string, value: string): string => {
