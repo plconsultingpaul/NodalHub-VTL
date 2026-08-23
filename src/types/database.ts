@@ -663,6 +663,8 @@ export interface Database {
           prompt_title: string | null;
           prompt_description: string | null;
           show_on_mobile: boolean;
+          requires_confirmation: boolean;
+          confirmation_message: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -683,6 +685,8 @@ export interface Database {
           prompt_title?: string | null;
           prompt_description?: string | null;
           show_on_mobile?: boolean;
+          requires_confirmation?: boolean;
+          confirmation_message?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -703,6 +707,8 @@ export interface Database {
           prompt_title?: string | null;
           prompt_description?: string | null;
           show_on_mobile?: boolean;
+          requires_confirmation?: boolean;
+          confirmation_message?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1047,7 +1053,7 @@ export interface PulseInputVariable {
 
 export interface PulseVariableMapping {
   variableName: string;
-  source: 'column' | 'hardcode' | 'prompt' | 'current_user';
+  source: 'column' | 'hardcode' | 'prompt' | 'current_user' | 'dashboard_param';
   sourceValue: string;
   valueType?: 'text' | 'number' | 'date';
 }
@@ -1234,10 +1240,23 @@ export interface ActionParameterMapping {
   fixedValueId?: string;
   lookupQueryId?: string;
   isPathVariable?: boolean;
+  isCustomQueryParam?: boolean;
   userField?: 'username' | 'full_name';
+  optionsFilter?: ActionOptionsFilter;
 }
 
-export type ActionType = 'execute' | 'popup' | 'link';
+export interface ActionOptionsFilterRule {
+  parentValue: string;
+  allowedValues: string[];
+}
+
+export interface ActionOptionsFilter {
+  parentParameterName: string;
+  rules: ActionOptionsFilterRule[];
+  defaultAllowedValues?: string[];
+}
+
+export type ActionType = 'execute' | 'popup' | 'link' | 'run_report';
 
 export type ActionVisibilityOperator = 'is_not_empty' | 'is_empty' | 'equals' | 'not_equals' | 'contains' | 'greater_than' | 'less_than';
 
