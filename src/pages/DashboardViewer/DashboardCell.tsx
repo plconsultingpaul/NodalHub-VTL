@@ -8,8 +8,9 @@ import DatePicker from '../../components/ui/DatePicker';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
-import { executeActionForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction, actionRequiresRowData } from './actionExecutor';
+import { executeActionForRows, executeRunReportForRow, getPromptMappings, getFixedValueListMappings, executeLinkAction, actionRequiresRowData } from './actionExecutor';
 import type { ActionProgressCallback } from './actionExecutor';
+import ReportViewerModal from './ReportViewerModal';
 import type {
   DashboardCellWithRelations,
   DashboardCellDrilldownWithQuery,
@@ -986,6 +987,14 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     onProgress?: ActionProgressCallback;
   } | null>(null);
   const [cellProcessing, setCellProcessing] = useState<{ name: string; current: number; total: number } | null>(null);
+  const [reportViewer, setReportViewer] = useState<{ objectUrl: string; title: string; fileName: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    actionName: string;
+    message: string;
+    rowCount: number;
+    onConfirm: () => void;
+    onCancel: () => void;
+  } | null>(null);
   const drilldownTabulatorsRef = useRef<Map<string, { tabulator: Tabulator; container: HTMLElement }>>(new Map());
   const cellActionsRef = useRef(cellActions);
   cellActionsRef.current = cellActions;
@@ -1012,6 +1021,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     filterModeState: Map<string, string>;
     calcState: Map<string, Set<string>>;
   } | null>(null);
+  const lastAppliedTemplateIdRef = useRef<string | null | undefined>(templateId);
 
   const drilldownAvailabilityRef = useRef(drilldownAvailability);
   drilldownAvailabilityRef.current = drilldownAvailability;
@@ -1804,6 +1814,25 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     action: DashboardCellActionWithQuery,
     onProgress?: ActionProgressCallback
   ): Promise<{ success: number; failed: number; pulseTriggered: number; errors: string[] }> => {
+    if (action.requires_confirmation) {
+      let rowCount = 0;
+      if (cell.enable_row_selection && tabulatorRef.current) {
+        rowCount = tabulatorRef.current.getSelectedRows().length;
+      }
+      const confirmed = await new Promise<boolean>((resolve) => {
+        setConfirmDialog({
+          actionName: action.display_name,
+          message: action.confirmation_message?.trim() || `Are you sure you want to run "${action.display_name}"${rowCount > 1 ? ` on ${rowCount} rows` : ''}?`,
+          rowCount: Math.max(rowCount, 1),
+          onConfirm: () => { setConfirmDialog(null); resolve(true); },
+          onCancel: () => { setConfirmDialog(null); resolve(false); },
+        });
+      });
+      if (!confirmed) {
+        return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
+      }
+    }
+
     let rows: Record<string, unknown>[] = [];
 
     if (cell.enable_row_selection && tabulatorRef.current) {
@@ -1836,7 +1865,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
-    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues, profile);
+    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues, profile, parameterValuesRef.current);
 
     if (action.refresh_after_execute) {
       fetchData();
@@ -2000,6 +2029,12 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     if (!tableRef.current || data.length === 0) {
       return;
     }
+
+    const templateChanged = lastAppliedTemplateIdRef.current !== templateId;
+    if (templateChanged) {
+      savedFilterStateRef.current = null;
+    }
+    lastAppliedTemplateIdRef.current = templateId;
 
     // Check if filter state was saved by cleanup (indicates a rebuild/refresh)
     const isRebuild = savedFilterStateRef.current !== null;
@@ -2379,6 +2414,27 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
     const contextMenuActions = cellActionsRef.current.filter(a => a.display_mode === 'context_menu' || a.display_mode === 'both');
     if (contextMenuActions.length > 0) {
       const executeActionFromMenu = async (action: DashboardCellActionWithQuery, cellComp: Tabulator.CellComponent) => {
+        if (action.requires_confirmation && action.action_type !== 'popup') {
+          let rowCount = 1;
+          if (action.action_type === 'execute' && cell.enable_row_selection && tabulatorRef.current) {
+            const sel = tabulatorRef.current.getSelectedRows();
+            if (sel.length > 1) rowCount = sel.length;
+          }
+          const proceed = () => {
+            const cloned = { ...action, requires_confirmation: false } as DashboardCellActionWithQuery;
+            setConfirmDialog(null);
+            executeActionFromMenu(cloned, cellComp);
+          };
+          setConfirmDialog({
+            actionName: action.display_name,
+            message: action.confirmation_message?.trim() || `Are you sure you want to run "${action.display_name}"${rowCount > 1 ? ` on ${rowCount} rows` : ''}?`,
+            rowCount,
+            onConfirm: proceed,
+            onCancel: () => setConfirmDialog(null),
+          });
+          return;
+        }
+
         if (action.action_type === 'popup') {
           const rd = cellComp.getRow().getData() as Record<string, unknown>;
           const template = (typeof action.popup_template === 'string' ? action.popup_template : '') || '';
@@ -2402,6 +2458,36 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
             return;
           }
           executeLinkAction(action, rd, undefined, fixedValues, profile);
+          return;
+        }
+
+        if (action.action_type === 'run_report') {
+          const rd = cellComp.getRow().getData() as Record<string, unknown>;
+          const prompts = getPromptMappings(action);
+          const fvListMappings = getFixedValueListMappings(action, fixedValues);
+          const allPromptMappings = [...prompts, ...fvListMappings];
+          if (allPromptMappings.length > 0) {
+            setPromptDialog({
+              action,
+              mappings: allPromptMappings,
+              values: Object.fromEntries(allPromptMappings.map(p => [p.parameterName, ''])),
+              rows: [rd],
+            });
+            promptResolveRef.current = (result) => {
+              onActionCompleteRef.current?.(action.display_name, result);
+            };
+            return;
+          }
+          setCellProcessing({ name: action.display_name, current: 0, total: 1 });
+          const result = await executeRunReportForRow(action, rd, undefined, fixedValues, profile);
+          setCellProcessing(null);
+          if (result.ok && result.objectUrl) {
+            const safeName = action.display_name.replace(/[^a-z0-9-_]+/gi, '_') || 'report';
+            setReportViewer({ objectUrl: result.objectUrl, title: action.display_name, fileName: `${safeName}.pdf` });
+            onActionCompleteRef.current?.(action.display_name, { success: 1, failed: 0, pulseTriggered: 0, errors: [] });
+          } else {
+            onActionCompleteRef.current?.(action.display_name, { success: 0, failed: 1, pulseTriggered: 0, errors: result.error ? [result.error] : ['Failed to run report'] });
+          }
           return;
         }
 
@@ -2438,7 +2524,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
         const result = await executeActionForRows(action, rows, (current, total) => {
           setCellProcessing({ name: action.display_name, current, total });
-        }, undefined, fixedValues, profile);
+        }, undefined, fixedValues, profile, parameterValuesRef.current);
         setCellProcessing(null);
 
         if (action.refresh_after_execute) {
@@ -2458,6 +2544,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         const executeActions = visibleActions.filter(a => a.action_type === 'execute');
         const popupActions = visibleActions.filter(a => a.action_type === 'popup');
         const linkActions = visibleActions.filter(a => a.action_type === 'link');
+        const reportActions = visibleActions.filter(a => a.action_type === 'run_report');
 
       if (executeActions.length > 0) {
         if (executeActions.length === 1) {
@@ -2523,6 +2610,29 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           }));
           cellContextMenu.push({
             label: '<span style="font-weight:500;color:#0284c7;">&#128196; Popup</span>',
+            menu: subMenu
+          } as unknown as Tabulator.MenuObject<Tabulator.CellComponent>);
+        }
+      }
+
+      if (reportActions.length > 0) {
+        if (reportActions.length === 1) {
+          const action = reportActions[0];
+          cellContextMenu.push({
+            label: `<span style="font-weight:500;color:#be123c;">&#128209; ${action.display_name}</span>`,
+            action: (_e, cellComponent) => {
+              executeActionFromMenu(action, cellComponent);
+            }
+          } as Tabulator.MenuObject<Tabulator.CellComponent>);
+        } else {
+          const subMenu = reportActions.map(action => ({
+            label: `<span style="color:#be123c;">&#128209; ${action.display_name}</span>`,
+            action: (_e: Event, cellComponent: Tabulator.CellComponent) => {
+              executeActionFromMenu(action, cellComponent);
+            }
+          }));
+          cellContextMenu.push({
+            label: '<span style="font-weight:500;color:#be123c;">&#128209; Run Report</span>',
             menu: subMenu
           } as unknown as Tabulator.MenuObject<Tabulator.CellComponent>);
         }
@@ -2865,6 +2975,28 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       return;
     }
 
+    if (action.action_type === 'run_report') {
+      setCellProcessing({ name: action.display_name, current: 0, total: 1 });
+      const result = await executeRunReportForRow(action, rows[0], values, fixedValues, profile);
+      setCellProcessing(null);
+      let dispatchResult: { success: number; failed: number; pulseTriggered: number; errors: string[] };
+      if (result.ok && result.objectUrl) {
+        const safeName = action.display_name.replace(/[^a-z0-9-_]+/gi, '_') || 'report';
+        setReportViewer({ objectUrl: result.objectUrl, title: action.display_name, fileName: `${safeName}.pdf` });
+        dispatchResult = { success: 1, failed: 0, pulseTriggered: 0, errors: [] };
+      } else {
+        dispatchResult = { success: 0, failed: 1, pulseTriggered: 0, errors: result.error ? [result.error] : ['Failed to run report'] };
+      }
+      if (action.refresh_after_execute) {
+        fetchData();
+      }
+      if (promptResolveRef.current) {
+        promptResolveRef.current(dispatchResult);
+        promptResolveRef.current = null;
+      }
+      return;
+    }
+
     const progressCallback: ActionProgressCallback = onProgress || ((current, total) => {
       setCellProcessing({ name: action.display_name, current, total });
     });
@@ -2873,7 +3005,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
     }
 
-    const result = await executeActionForRows(action, rows, progressCallback, values, fixedValues, profile);
+    const result = await executeActionForRows(action, rows, progressCallback, values, fixedValues, profile, parameterValuesRef.current);
 
     if (!onProgress) {
       setCellProcessing(null);
@@ -2898,7 +3030,22 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   }, []);
 
   const handlePromptValueChange = useCallback((paramName: string, value: string) => {
-    setPromptDialog(prev => prev ? { ...prev, values: { ...prev.values, [paramName]: value } } : null);
+    setPromptDialog(prev => {
+      if (!prev) return null;
+      const nextValues = { ...prev.values, [paramName]: value };
+      for (const m of prev.mappings) {
+        if (m.optionsFilter?.parentParameterName === paramName) {
+          const current = nextValues[m.parameterName];
+          if (!current) continue;
+          const rule = m.optionsFilter.rules.find(r => r.parentValue === value);
+          const allowed = rule ? rule.allowedValues : m.optionsFilter.defaultAllowedValues;
+          if (allowed && !allowed.includes(current)) {
+            nextValues[m.parameterName] = '';
+          }
+        }
+      }
+      return { ...prev, values: nextValues };
+    });
   }, []);
 
   const activeGroupBy = formattingRules.groupBy || [];
@@ -3028,6 +3175,41 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         </div>
       )}
 
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-sm mx-4">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
+                <svg className="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.5h.008M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Confirm "{confirmDialog.actionName}"
+                </h4>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-wrap">
+                  {confirmDialog.message}
+                </p>
+              </div>
+            </div>
+            <div className="p-3 flex items-center justify-end gap-2 bg-gray-50 dark:bg-gray-900/40 rounded-b-lg">
+              <button
+                onClick={confirmDialog.onCancel}
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                autoFocus
+                className="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded"
+              >
+                Yes, run it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {promptDialog && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-sm mx-4">
@@ -3078,6 +3260,19 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                     );
                   }
                   const listItems = fv?.list_values || [];
+                  let filteredListItems = listItems;
+                  if (m.optionsFilter?.parentParameterName) {
+                    const parentValue = promptDialog.values[m.optionsFilter.parentParameterName];
+                    if (parentValue !== undefined && parentValue !== '') {
+                      const rule = m.optionsFilter.rules.find(r => r.parentValue === parentValue);
+                      const allowed = rule ? rule.allowedValues : m.optionsFilter.defaultAllowedValues;
+                      if (allowed) {
+                        filteredListItems = listItems.filter(item => allowed.includes(item.value));
+                      }
+                    } else if (m.optionsFilter.defaultAllowedValues) {
+                      filteredListItems = listItems.filter(item => m.optionsFilter!.defaultAllowedValues!.includes(item.value));
+                    }
+                  }
                   return (
                     <div key={m.parameterName}>
                       <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -3087,7 +3282,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
                       <CustomDropdown
                         value={promptDialog.values[m.parameterName] || ''}
                         onChange={(val) => handlePromptValueChange(m.parameterName, val)}
-                        options={listItems.map(item => ({ value: item.value, label: item.description || item.value }))}
+                        options={filteredListItems.map(item => ({ value: item.value, label: item.description || item.value }))}
                         placeholder="Select a value..."
                         size="sm"
                         searchable
@@ -3184,6 +3379,19 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           </div>
         </div>
       )}
+      <ReportViewerModal
+        isOpen={!!reportViewer}
+        objectUrl={reportViewer?.objectUrl ?? null}
+        title={reportViewer?.title ?? 'Report'}
+        fileName={reportViewer?.fileName}
+        onClose={() => {
+          if (reportViewer?.objectUrl) {
+            const url = reportViewer.objectUrl;
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }
+          setReportViewer(null);
+        }}
+      />
     </div>
   );
 });
