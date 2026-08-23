@@ -209,120 +209,256 @@ export async function executeActionForRow(
   fixedValues?: FixedValue[],
   userProfile?: Profile | null
 ): Promise<{ ok: boolean; error?: string }> {
-  const query = action.queries;
-  if (!query || !query.api_endpoint_id) return { ok: false, error: 'No query or endpoint configured' };
-
-  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues, userProfile);
+  const req = await buildActionRequest(action, rowData, promptValues, fixedValues, userProfile);
+  if ('error' in req) return { ok: false, error: req.error };
 
   try {
-    const ep = await fetchEndpoint(query.api_endpoint_id);
-    if (!ep) return { ok: false, error: 'API endpoint not found' };
-
-    const userParams = (query.user_parameters as unknown as UserParameter[]) || [];
-    const pathVarConfig = (query.path_variable_config as Record<string, string>) || {};
-    const baseUrl = ep.url.replace(/\/$/, '');
-    let substitutedSubPath = substitutePathParameters(query.api_sub_path, userParams, paramValues);
-
-    // Apply path variable mappings from cell action config (isPathVariable mappings)
-    const pathVarMappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
-    pathVarMappings
-      .filter(m => m.isPathVariable)
-      .forEach(m => {
-        const varName = m.parameterName.replace(/^\{|\}$/g, '');
-        let value = '';
-        if (m.target === 'column' && m.columnName) {
-          value = String(rowData[m.columnName] ?? '');
-        } else if (m.target === 'hardcode') {
-          value = m.hardcodeValue || '';
-        } else if (m.target === 'prompt' || m.target === 'lookup') {
-          value = promptValues?.[m.parameterName] || '';
-        } else if (m.target === 'fixed_value') {
-          if (m.fixedValueId && fixedValues) {
-            const fv = fixedValues.find(f => f.id === m.fixedValueId);
-            if (fv) value = resolveFixedValue(fv);
-          }
-        } else if (m.target === 'user') {
-          if (userProfile) {
-            value = (m.userField === 'full_name' ? userProfile.full_name : userProfile.username) || '';
-          }
-        }
-        if (value) {
-          const regex = new RegExp(`\\{${varName}\\}`, 'gi');
-          substitutedSubPath = substitutedSubPath.replace(regex, encodeURIComponent(value));
-        }
-      });
-
-    // Also apply stored path_variable_config values
-    if (Object.keys(pathVarConfig).length > 0) {
-      substitutedSubPath = substitutedSubPath.replace(/\{([^}]+)\}/g, (match, varName) => {
-        const configValue = pathVarConfig[varName];
-        if (configValue) {
-          const dynamicMatch = configValue.match(/\{\{([^}]+)\}\}/);
-          if (dynamicMatch) {
-            const resolved = paramValues[`@${dynamicMatch[1]}`] || paramValues[dynamicMatch[1]] || '';
-            return encodeURIComponent(resolved);
-          }
-          return encodeURIComponent(configValue);
-        }
-        return match;
-      });
-    }
-    const normalizedSubPath = substitutedSubPath.replace(/^\//, '').replace(/\/$/, '');
-    let url = normalizedSubPath ? `${baseUrl}/${normalizedSubPath}` : baseUrl;
-
-    const queryParams = query.query_parameters as Array<{ key: string; value: string; enabled: boolean }> | null;
-    const enabledParams = queryParams?.filter(p => p.enabled && p.value);
-
-    let queryString = '';
-    if (enabledParams && enabledParams.length > 0) {
-      queryString = enabledParams
-        .map(p => {
-          const substitutedValue = substituteUserParameters(p.value, paramValues);
-          return `${encodeURIComponent(p.key)}=${encodeURIComponent(substitutedValue)}`;
-        })
-        .join('&');
-    } else if (query.url_query_string) {
-      queryString = substituteUserParameters(query.url_query_string, paramValues);
-    }
-
-    if (queryString) url += `?${queryString}`;
-
-    const headers = buildHeaders(ep);
-    let body: string | undefined;
-
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(query.http_method)) {
-      if (query.query_type === 'sql' || query.query_type === 'stored_procedure') {
-        const inputs: Record<string, string> = {};
-        Object.entries(paramValues).forEach(([key, val]) => {
-          inputs[key.replace(/^@/, '')] = val;
-        });
-        body = JSON.stringify({ name: query.name, inputs });
-      } else {
-        const fieldMappings = (query.request_body_field_mappings as unknown as RequestBodyFieldMapping[]) || [];
-        const requestBody = buildRequestBody(query.request_body_template, fieldMappings, paramValues);
-        if (requestBody) {
-          body = JSON.stringify(requestBody);
-        }
-      }
-    }
-
-    const response = await proxyFetch(url, {
-      method: query.http_method,
-      headers,
-      body,
-      endpointId: query.api_endpoint_id,
+    const response = await proxyFetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      endpointId: req.endpointId,
     });
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
     }
-    console.log('[actionExecutor] Action succeeded:', { status: response.status, url });
+    console.log('[actionExecutor] Action succeeded:', { status: response.status, url: req.url });
     return { ok: true };
   } catch (err) {
     console.error('[actionExecutor] Execution error:', err);
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
+}
+
+export async function executeRunReportForRow(
+  action: DashboardCellActionWithQuery,
+  rowData: Record<string, unknown>,
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
+): Promise<{ ok: boolean; objectUrl?: string; error?: string }> {
+  const req = await buildActionRequest(action, rowData, promptValues, fixedValues, userProfile);
+  if ('error' in req) {
+    return { ok: false, error: req.error };
+  }
+
+  try {
+    const response = await proxyFetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      endpointId: req.endpointId,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+
+    const blob = await response.blob();
+    if (blob.size === 0) {
+      return { ok: false, error: 'The report response was empty.' };
+    }
+
+    const isPdfContentType = blob.type.startsWith('application/pdf');
+    let pdfBytes: Uint8Array | null = null;
+
+    if (isPdfContentType) {
+      pdfBytes = new Uint8Array(await blob.arrayBuffer());
+    } else {
+      const bodyText = await blob.text();
+      pdfBytes = extractPdfBytesFromJsonEnvelope(bodyText);
+      if (!pdfBytes) {
+        return { ok: false, error: 'Report response did not contain a PDF.' };
+      }
+    }
+
+    if (!hasPdfMagicNumber(pdfBytes)) {
+      return { ok: false, error: 'Report response did not contain a valid PDF.' };
+    }
+
+    const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const objectUrl = URL.createObjectURL(pdfBlob);
+    return { ok: true, objectUrl };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+interface BuiltActionRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+  endpointId: string;
+}
+
+function hasPdfMagicNumber(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+}
+
+function base64ToUint8Array(b64: string): Uint8Array | null {
+  try {
+    const clean = b64.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+    const binary = atob(clean);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function extractPdfBytesFromJsonEnvelope(bodyText: string): Uint8Array | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+
+  const preferredKeys = ['reportData', 'pdfData', 'data', 'pdf', 'content', 'body', 'fileContent', 'base64'];
+  for (const key of preferredKeys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.length > 0) {
+      const decoded = base64ToUint8Array(value);
+      if (decoded && hasPdfMagicNumber(decoded)) return decoded;
+    }
+  }
+
+  for (const value of Object.values(obj)) {
+    if (typeof value === 'string' && value.length > 100 && /^[A-Za-z0-9+/=\s]+$/.test(value.slice(0, 200))) {
+      const decoded = base64ToUint8Array(value);
+      if (decoded && hasPdfMagicNumber(decoded)) return decoded;
+    }
+  }
+
+  return null;
+}
+
+async function buildActionRequest(
+  action: DashboardCellActionWithQuery,
+  rowData: Record<string, unknown>,
+  promptValues?: Record<string, string>,
+  fixedValues?: FixedValue[],
+  userProfile?: Profile | null
+): Promise<BuiltActionRequest | { error: string }> {
+  const query = action.queries;
+  if (!query || !query.api_endpoint_id) return { error: 'No query or endpoint configured' };
+
+  const paramValues = buildParamValues(action, rowData, promptValues, fixedValues, userProfile);
+
+  const ep = await fetchEndpoint(query.api_endpoint_id);
+  if (!ep) return { error: 'API endpoint not found' };
+
+  const userParams = (query.user_parameters as unknown as UserParameter[]) || [];
+  const pathVarConfig = (query.path_variable_config as Record<string, string>) || {};
+  const baseUrl = ep.url.replace(/\/$/, '');
+  let substitutedSubPath = substitutePathParameters(query.api_sub_path, userParams, paramValues);
+
+  const pathVarMappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
+  pathVarMappings
+    .filter(m => m.isPathVariable)
+    .forEach(m => {
+      const varName = m.parameterName.replace(/^\{|\}$/g, '');
+      let value = '';
+      if (m.target === 'column' && m.columnName) {
+        value = String(rowData[m.columnName] ?? '');
+      } else if (m.target === 'hardcode') {
+        value = m.hardcodeValue || '';
+      } else if (m.target === 'prompt' || m.target === 'lookup') {
+        value = promptValues?.[m.parameterName] || '';
+      } else if (m.target === 'fixed_value') {
+        if (m.fixedValueId && fixedValues) {
+          const fv = fixedValues.find(f => f.id === m.fixedValueId);
+          if (fv) value = resolveFixedValue(fv);
+        }
+      } else if (m.target === 'user') {
+        if (userProfile) {
+          value = (m.userField === 'full_name' ? userProfile.full_name : userProfile.username) || '';
+        }
+      }
+      if (value) {
+        const regex = new RegExp(`\\{${varName}\\}`, 'gi');
+        substitutedSubPath = substitutedSubPath.replace(regex, encodeURIComponent(value));
+      }
+    });
+
+  if (Object.keys(pathVarConfig).length > 0) {
+    substitutedSubPath = substitutedSubPath.replace(/\{([^}]+)\}/g, (match, varName) => {
+      const configValue = pathVarConfig[varName];
+      if (configValue) {
+        const dynamicMatch = configValue.match(/\{\{([^}]+)\}\}/);
+        if (dynamicMatch) {
+          const resolved = paramValues[`@${dynamicMatch[1]}`] || paramValues[dynamicMatch[1]] || '';
+          return encodeURIComponent(resolved);
+        }
+        return encodeURIComponent(configValue);
+      }
+      return match;
+    });
+  }
+  const normalizedSubPath = substitutedSubPath.replace(/^\//, '').replace(/\/$/, '');
+  let url = normalizedSubPath ? `${baseUrl}/${normalizedSubPath}` : baseUrl;
+
+  const rawQueryParams = query.query_parameters as Array<{ key: string; value: string; enabled: boolean; isCustom?: boolean }> | null;
+  const mappings = (action.parameter_mappings as unknown as ActionParameterMapping[]) || [];
+  const queryParams = rawQueryParams?.map(p => {
+    if (!p.isCustom) return p;
+    const mapped = mappings.find(m => m.isCustomQueryParam && m.parameterName === p.key);
+    if (!mapped) return p;
+    const mappedValue = paramValues[p.key];
+    if (mappedValue !== undefined && mappedValue !== '') {
+      return { ...p, value: mappedValue };
+    }
+    return p;
+  }) || null;
+  const enabledParams = queryParams?.filter(p => p.enabled && p.value);
+
+  let queryString = '';
+  if (enabledParams && enabledParams.length > 0) {
+    queryString = enabledParams
+      .map(p => {
+        const substitutedValue = substituteUserParameters(p.value, paramValues);
+        return `${encodeURIComponent(p.key)}=${encodeURIComponent(substitutedValue)}`;
+      })
+      .join('&');
+  } else if (query.url_query_string) {
+    queryString = substituteUserParameters(query.url_query_string, paramValues);
+  }
+
+  if (queryString) url += `?${queryString}`;
+
+  const headers = buildHeaders(ep);
+  let body: string | undefined;
+
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(query.http_method)) {
+    if (query.query_type === 'sql' || query.query_type === 'stored_procedure') {
+      const inputs: Record<string, string> = {};
+      Object.entries(paramValues).forEach(([key, val]) => {
+        inputs[key.replace(/^@/, '')] = val;
+      });
+      body = JSON.stringify({ name: query.name, inputs });
+    } else {
+      const fieldMappings = (query.request_body_field_mappings as unknown as RequestBodyFieldMapping[]) || [];
+      const requestBody = buildRequestBody(query.request_body_template, fieldMappings, paramValues);
+      if (requestBody) {
+        body = JSON.stringify(requestBody);
+      }
+    }
+  }
+
+  return {
+    url,
+    method: query.http_method,
+    headers,
+    body,
+    endpointId: query.api_endpoint_id,
+  };
 }
 
 function delay(ms: number): Promise<void> {
@@ -332,7 +468,8 @@ function delay(ms: number): Promise<void> {
 async function triggerPostActionPulse(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
-  promptValues?: Record<string, string>
+  promptValues?: Record<string, string>,
+  dashboardParamValues?: Record<string, string>
 ): Promise<{ ok: boolean; error?: string }> {
   if (!action.post_action_pulse_id) return { ok: false, error: 'No pulse configured' };
 
@@ -377,6 +514,8 @@ async function triggerPostActionPulse(
       } else {
         inputVariables[mapping.variableName] = '';
       }
+    } else if (mapping.source === 'dashboard_param') {
+      inputVariables[mapping.variableName] = dashboardParamValues?.[mapping.sourceValue] ?? '';
     }
   }
 
@@ -424,7 +563,8 @@ export async function executeActionForRows(
   onProgress?: ActionProgressCallback,
   promptValues?: Record<string, string>,
   fixedValues?: FixedValue[],
-  userProfile?: Profile | null
+  userProfile?: Profile | null,
+  dashboardParamValues?: Record<string, string>
 ): Promise<ActionExecutionResult> {
   if (rows.length === 0) {
     return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
@@ -441,7 +581,7 @@ export async function executeActionForRows(
     if (result.ok) {
       success++;
       if (action.post_action_pulse_id) {
-        const pulseResult = await triggerPostActionPulse(action, rows[i], promptValues);
+        const pulseResult = await triggerPostActionPulse(action, rows[i], promptValues, dashboardParamValues);
         if (pulseResult.ok) {
           pulseTriggered++;
         } else if (pulseResult.error && !errors.includes(pulseResult.error)) {
