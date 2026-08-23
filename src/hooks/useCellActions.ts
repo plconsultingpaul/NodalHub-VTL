@@ -43,6 +43,8 @@ export function useCellActions() {
       prompt_title?: string;
       prompt_description?: string;
       show_on_mobile?: boolean;
+      requires_confirmation?: boolean;
+      confirmation_message?: string | null;
     }>
   ): Promise<{ error: string | null }> => {
     setLoading(true);
@@ -84,6 +86,8 @@ export function useCellActions() {
           prompt_title: action.prompt_title || null,
           prompt_description: action.prompt_description || null,
           show_on_mobile: action.show_on_mobile ?? true,
+          requires_confirmation: action.requires_confirmation ?? false,
+          confirmation_message: action.confirmation_message ?? null,
         };
 
         if (action.id) {
