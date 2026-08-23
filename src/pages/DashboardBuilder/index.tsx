@@ -11,7 +11,7 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import CellConfigPanel from './CellConfigPanel';
 import ActionsConfigModal from '../DashboardViewer/ActionsConfigModal';
-import type { Dashboard } from '../../types/database';
+import type { Dashboard, UserParameter } from '../../types/database';
 
 interface DrilldownConfig {
   id?: string;
@@ -775,6 +775,23 @@ export default function DashboardBuilder() {
     setSelectedCellIndex(newIdx >= 0 ? newIdx : null);
   };
 
+  const dashboardParameters = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    cells.forEach(cell => {
+      if (!cell.query_id) return;
+      const query = queries.find(q => q.id === cell.query_id);
+      const params = (query?.user_parameters as UserParameter[] | undefined) || [];
+      params.forEach(p => {
+        if (p.name && !seen.has(p.name)) {
+          seen.add(p.name);
+          names.push(p.name);
+        }
+      });
+    });
+    return names;
+  }, [cells, queries]);
+
   const canMergeDown = useMemo(() => {
     if (selectedCellIndex === null || !cells[selectedCellIndex]) return false;
     const selectedCell = cells[selectedCellIndex];
@@ -996,6 +1013,7 @@ export default function DashboardBuilder() {
         cellId={selectedCellIndex !== null ? cells[selectedCellIndex]?.id : undefined}
         queries={queries}
         availableColumns={availableColumns}
+        dashboardParameters={dashboardParameters}
       />
     </div>
   );
