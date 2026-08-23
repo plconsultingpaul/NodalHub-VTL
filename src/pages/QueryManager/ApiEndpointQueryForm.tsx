@@ -289,7 +289,10 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
 
       if (savedParametersRef.current && savedParametersRef.current.length > 0) {
         console.log('[loadFields] Merging with saved params');
-        const savedByKey = new Map(savedParametersRef.current.map(p => [p.key, p]));
+        const savedByKey = new Map(
+          savedParametersRef.current.filter(p => !p.isCustom).map(p => [p.key, p])
+        );
+        const savedCustom = savedParametersRef.current.filter(p => p.isCustom);
         console.log('[loadFields] savedByKey keys:', Array.from(savedByKey.keys()));
         const merged = queryFields.map(f => {
           const saved = savedByKey.get(f.field_name);
@@ -313,8 +316,8 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
             required: f.is_required
           };
         });
-        console.log('[loadFields] Merged result:', merged);
-        setQueryParameters(merged);
+        console.log('[loadFields] Merged result:', merged, 'custom:', savedCustom);
+        setQueryParameters([...merged, ...savedCustom]);
         if (query?.id) {
           processedQueryIdRef.current = query.id;
         }
@@ -380,6 +383,17 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
 
   const handleClearAll = () => {
     setQueryParameters(params => params.map(p => ({ ...p, enabled: false, value: '' })));
+  };
+
+  const handleAddCustomParameter = () => {
+    setQueryParameters(prev => [
+      ...prev,
+      { key: '', value: '', type: 'string', description: '', example: null, enabled: true, required: false, isCustom: true }
+    ]);
+  };
+
+  const handleRemoveParameter = (index: number) => {
+    setQueryParameters(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleAddUserParameter = () => {
@@ -997,18 +1011,29 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
         </div>
       )}
 
-      {queryParameters.length > 0 && (
-        <div className="border rounded-lg p-4 dark:border-gray-600">
+      <div className="border rounded-lg p-4 dark:border-gray-600">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Query Parameters ({queryParameters.length} available)
+              Query Parameters{queryParameters.length > 0 && ` (${queryParameters.length} available)`}
             </h4>
-            <button
-              onClick={handleClearAll}
-              className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              Clear All
-            </button>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleAddCustomParameter}
+              >
+                <Plus className="w-4 h-4" />
+                Add Parameter
+              </Button>
+              {queryParameters.some(p => p.enabled) && (
+                <button
+                  onClick={handleClearAll}
+                  className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1019,25 +1044,39 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
               <div></div>
             </div>
 
-            {queryParameters.map((param, index) => (
-              <div key={param.key} className="grid grid-cols-[auto_1fr_1fr_auto] gap-2 items-center">
+            {queryParameters.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No parameters yet. Click Add Parameter to create a custom query parameter, or select a spec endpoint above to pull parameters from the API specification.
+              </p>
+            ) : queryParameters.map((param, index) => (
+              <div key={param.isCustom ? `custom-${index}` : `spec-${param.key}`} className="grid grid-cols-[auto_1fr_1fr_auto] gap-2 items-center">
                 <input
                   type="checkbox"
                   checked={param.enabled}
                   onChange={(e) => handleParameterChange(index, 'enabled', e.target.checked)}
                   className="rounded border-gray-300"
                 />
-                <div className="flex items-center gap-1">
-                  <span className="text-sm dark:text-white">{param.key}</span>
-                  <span className="px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 rounded">
-                    {param.type}
-                  </span>
-                  {param.description && (
-                    <button className="text-gray-400 hover:text-gray-600" title={param.description}>
-                      <Info className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                {param.isCustom ? (
+                  <input
+                    type="text"
+                    value={param.key}
+                    onChange={(e) => handleParameterChange(index, 'key', e.target.value)}
+                    placeholder="parameter name"
+                    className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-black dark:bg-gray-700 dark:text-white"
+                  />
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm dark:text-white">{param.key}</span>
+                    <span className="px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 rounded">
+                      {param.type}
+                    </span>
+                    {param.description && (
+                      <button className="text-gray-400 hover:text-gray-600" title={param.description}>
+                        <Info className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
                 <input
                   ref={(el) => { paramInputRefs.current[index] = el; }}
                   type="text"
@@ -1047,7 +1086,16 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
                   placeholder={param.example || 'value'}
                   className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-black dark:bg-gray-700 dark:text-white"
                 />
-                {shouldShowPickerButton(param) ? (
+                {param.isCustom ? (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveParameter(index)}
+                    className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                    title="Remove parameter"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                ) : shouldShowPickerButton(param) ? (
                   <button
                     type="button"
                     onClick={() => handleFieldPickerOpen(index)}
@@ -1065,10 +1113,9 @@ export default function ApiEndpointQueryForm({ query, onSave, onCancel, saving, 
           </div>
 
           <p className="mt-3 text-xs text-gray-500">
-            Parameters from API specification. Check to enable and enter values. Use {'${variableName}'} for dynamic values.
+            Parameters from the API specification plus any custom ones you add. Check to enable and enter values. Use {'${variableName}'} for dynamic values.
           </p>
         </div>
-      )}
 
       <div className="border rounded-lg p-4 dark:border-gray-600">
         <div className="flex items-center justify-between mb-3">
