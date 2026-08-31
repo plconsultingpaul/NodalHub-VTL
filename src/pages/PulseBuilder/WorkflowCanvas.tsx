@@ -21,12 +21,16 @@ import ApiEndpointNode from './nodes/ApiEndpointNode';
 import ConditionNode from './nodes/ConditionNode';
 import EmailNode from './nodes/EmailNode';
 import ActionNode from './nodes/ActionNode';
+import RunReportNode from './nodes/RunReportNode';
+import ImagingNode from './nodes/ImagingNode';
 import TriggerConfigPanel from './panels/TriggerConfigPanel';
 import ApiEndpointConfigPanel from './panels/ApiEndpointConfigPanel';
 import EmailConfigPanel from './panels/EmailConfigPanel';
 import ConditionConfigPanel from './panels/ConditionConfigPanel';
 import ActionConfigPanel from './panels/ActionConfigPanel';
-import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseActionStepConfig, PulseInputVariable, PulseSchedule } from '../../types/database';
+import RunReportConfigPanel from './panels/RunReportConfigPanel';
+import ImagingConfigPanel from './panels/ImagingConfigPanel';
+import type { PulseStepConfig, PulseTriggerStepConfig, PulseQueryStepConfig, PulseConditionStepConfig, PulseEmailStepConfig, PulseActionStepConfig, PulseRunReportStepConfig, PulseImagingStepConfig, PulseInputVariable, PulseSchedule } from '../../types/database';
 
 const nodeTypes = {
   trigger: TriggerNode,
@@ -34,6 +38,8 @@ const nodeTypes = {
   condition: ConditionNode,
   email: EmailNode,
   action: ActionNode,
+  run_report: RunReportNode,
+  imaging: ImagingNode,
 };
 
 const defaultTriggerNode: Node = {
@@ -242,6 +248,43 @@ export default function WorkflowCanvas({
         stepName: actionConfig.stepName,
         actionName: actionConfig.actionName,
       });
+    } else if (config.stepType === 'run_report') {
+      const rrConfig = config as PulseRunReportStepConfig;
+      const isConfigured = !!rrConfig.queryId && !!rrConfig.responseVariableName;
+      const label = rrConfig.stepName || 'Run Report';
+      updateNodeData(nodeId, {
+        configured: isConfigured,
+        label,
+        stepName: rrConfig.stepName,
+        actionName: rrConfig.actionName,
+        responseVariableName: rrConfig.responseVariableName,
+      });
+    } else if (config.stepType === 'imaging') {
+      const imgConfig = config as PulseImagingStepConfig;
+      const mode = imgConfig.mode || 'receive';
+      let isConfigured: boolean;
+      if (mode === 'send') {
+        const s = imgConfig.sendConfig || {};
+        const billOk = !!(s.billNumberMapping && s.billNumberMapping.sourceValue);
+        isConfigured =
+          !!imgConfig.vendorId &&
+          !!imgConfig.documentTypeId &&
+          !!imgConfig.bucketId &&
+          !!imgConfig.responseVariableName &&
+          !!s.sourcePdfNodeId &&
+          billOk;
+      } else {
+        const mapping = imgConfig.lookupMappings.find(m => m.field === imgConfig.lookupBy);
+        const hasValue = !!(mapping && mapping.sourceValue);
+        isConfigured = !!imgConfig.vendorId && !!imgConfig.documentTypeId && !!imgConfig.bucketId && !!imgConfig.responseVariableName && hasValue;
+      }
+      const label = imgConfig.stepName || 'Imaging';
+      updateNodeData(nodeId, {
+        configured: isConfigured,
+        label,
+        stepName: imgConfig.stepName,
+        responseVariableName: imgConfig.responseVariableName,
+      });
     }
   }, [updateNodeData]);
 
@@ -321,6 +364,8 @@ export default function WorkflowCanvas({
       const labelMap: Record<string, string> = {
         query: 'Query',
         action: 'Action',
+        run_report: 'Run Report',
+        imaging: 'Imaging',
         condition: 'Condition',
         email: 'Email',
       };
@@ -518,11 +563,32 @@ export default function WorkflowCanvas({
       const upstreamApiNodes = nodes
         .filter(n => n.type === 'query' && stepConfigs[n.id])
         .map(n => ({ id: n.id, label: (stepConfigs[n.id] as PulseQueryStepConfig).stepName || 'Query', queryId: (stepConfigs[n.id] as PulseQueryStepConfig).queryId }));
+      const upstreamReportNodes = nodes
+        .filter(n => (n.type === 'run_report' || n.type === 'imaging') && stepConfigs[n.id])
+        .map(n => {
+          if (n.type === 'imaging') {
+            const ic = stepConfigs[n.id] as PulseImagingStepConfig;
+            return {
+              id: n.id,
+              label: ic.stepName || 'Imaging',
+              responseVariableName: ic.responseVariableName || '',
+              attachmentFilename: ic.attachmentFilename || '',
+            };
+          }
+          const rc = stepConfigs[n.id] as PulseRunReportStepConfig;
+          return {
+            id: n.id,
+            label: rc.stepName || 'Run Report',
+            responseVariableName: rc.responseVariableName || '',
+            attachmentFilename: rc.attachmentFilename || '',
+          };
+        });
       return (
         <EmailConfigPanel
           config={config || null}
           onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
           upstreamNodes={upstreamApiNodes}
+          upstreamReportNodes={upstreamReportNodes}
           inputVariables={inputVariables}
         />
       );
@@ -548,6 +614,76 @@ export default function WorkflowCanvas({
           onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
           inputVariables={inputVariables}
           upstreamQueryNodes={upstreamQueryNodes}
+        />
+      );
+    }
+
+    if (selectedNode.type === 'run_report') {
+      const config = stepConfigs[selectedNode.id] as PulseRunReportStepConfig | undefined;
+      const upstreamQueryNodes = nodes
+        .filter(n => n.type === 'query' && stepConfigs[n.id])
+        .map(n => {
+          const qConfig = stepConfigs[n.id] as PulseQueryStepConfig;
+          return {
+            id: n.id,
+            label: qConfig.stepName || 'Query',
+            queryId: qConfig.queryId,
+            responseVariableName: qConfig.responseVariableName,
+            lastKnownColumns: (qConfig as unknown as { lastKnownColumns?: string[] }).lastKnownColumns || [],
+          };
+        });
+      return (
+        <RunReportConfigPanel
+          config={config || null}
+          onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
+          inputVariables={inputVariables}
+          upstreamQueryNodes={upstreamQueryNodes}
+        />
+      );
+    }
+
+    if (selectedNode.type === 'imaging') {
+      const config = stepConfigs[selectedNode.id] as PulseImagingStepConfig | undefined;
+      const upstreamQueryNodes = nodes
+        .filter(n => n.type === 'query' && stepConfigs[n.id])
+        .map(n => {
+          const qConfig = stepConfigs[n.id] as PulseQueryStepConfig;
+          return {
+            id: n.id,
+            label: qConfig.stepName || 'Query',
+            queryId: qConfig.queryId,
+            responseVariableName: qConfig.responseVariableName,
+            lastKnownColumns: (qConfig as unknown as { lastKnownColumns?: string[] }).lastKnownColumns || [],
+          };
+        });
+      const upstreamReportNodes = nodes
+        .filter(n => n.id !== selectedNode.id && (n.type === 'run_report' || n.type === 'imaging') && stepConfigs[n.id])
+        .map(n => {
+          if (n.type === 'imaging') {
+            const ic = stepConfigs[n.id] as PulseImagingStepConfig;
+            return {
+              id: n.id,
+              label: ic.stepName || 'Imaging',
+              responseVariableName: ic.responseVariableName || '',
+              type: 'imaging' as const,
+            };
+          }
+          const rc = stepConfigs[n.id] as PulseRunReportStepConfig;
+          return {
+            id: n.id,
+            label: rc.stepName || 'Run Report',
+            responseVariableName: rc.responseVariableName || '',
+            type: 'run_report' as const,
+          };
+        })
+        .filter(n => !!n.responseVariableName);
+      return (
+        <ImagingConfigPanel
+          config={config || null}
+          onChange={(newConfig) => handleStepConfigChange(selectedNode.id, newConfig)}
+          inputVariables={inputVariables}
+          upstreamQueryNodes={upstreamQueryNodes}
+          upstreamReportNodes={upstreamReportNodes}
         />
       );
     }
@@ -720,6 +856,9 @@ export default function WorkflowCanvas({
                   switch (n.type) {
                     case 'trigger': return '#3b82f6';
                     case 'query': return '#22c55e';
+                    case 'action': return '#f97316';
+                    case 'run_report': return '#e11d48';
+                    case 'imaging': return '#06b6d4';
                     case 'condition': return '#f59e0b';
                     case 'email': return '#8b5cf6';
                     default: return '#6b7280';
@@ -742,7 +881,10 @@ export default function WorkflowCanvas({
                   {selectedNode.type === 'trigger' ? 'Trigger' :
                    selectedNode.type === 'query' ? 'Query' :
                    selectedNode.type === 'condition' ? 'Condition' :
-                   selectedNode.type === 'email' ? 'Email' : 'Configure Node'}
+                   selectedNode.type === 'email' ? 'Email' :
+                   selectedNode.type === 'action' ? 'Action' :
+                   selectedNode.type === 'run_report' ? 'Run Report' :
+                   selectedNode.type === 'imaging' ? 'Imaging' : 'Configure Node'}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Configure step behavior and parameters
