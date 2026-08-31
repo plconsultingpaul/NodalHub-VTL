@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, ArrowUpDown, Smartphone, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Braces, Search, X, Info, Zap, Eye, EyeOff, ArrowUpDown, Smartphone, ShieldAlert } from 'lucide-react';
 import { useCellActions } from '../../hooks/useCellActions';
 import { useFixedValues } from '../../hooks/useFixedValues';
 import { usePulses } from '../../hooks/usePulses';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import CustomDropdown from '../../components/ui/CustomDropdown';
-import type { QueryWithRelations, UserParameter, ActionParameterMapping, ActionMappingValueType, ActionType, PulseVariableMapping, ActionVisibilityCondition, ActionVisibilityOperator, ActionOptionsFilter } from '../../types/database';
+import type { QueryWithRelations, UserParameter, ActionParameterMapping, ActionMappingValueType, ActionType, PulseVariableMapping, PulseInputVariable, ActionVisibilityCondition, ActionVisibilityOperator, ActionOptionsFilter } from '../../types/database';
 
 interface ActionConfig {
   id?: string;
@@ -27,6 +27,7 @@ interface ActionConfig {
   show_on_mobile: boolean;
   requires_confirmation: boolean;
   confirmation_message: string;
+  is_hidden: boolean;
 }
 
 interface ActionsConfigModalProps {
@@ -60,6 +61,7 @@ export default function ActionsConfigModal({
   const dragItemRef = useRef<number | null>(null);
   const dragOverItemRef = useRef<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
 
   const actionQueries = queries.filter(q => q.purpose_type === 'action');
   const lookupQueries = queries.filter(q => q.purpose_type === 'lookup');
@@ -100,6 +102,7 @@ export default function ActionsConfigModal({
           show_on_mobile: a.show_on_mobile ?? true,
           requires_confirmation: a.requires_confirmation ?? false,
           confirmation_message: a.confirmation_message ?? '',
+          is_hidden: a.is_hidden ?? false,
         };
       }));
       setLoadingActions(false);
@@ -128,6 +131,7 @@ export default function ActionsConfigModal({
           show_on_mobile: true,
           requires_confirmation: false,
           confirmation_message: '',
+          is_hidden: false,
         }
       ];
       setSelectedIndex(newActions.length - 1);
@@ -383,7 +387,9 @@ export default function ActionsConfigModal({
         ? a.display_name && a.popup_template.trim().length > 0
         : a.action_type === 'link'
           ? a.display_name && a.link_url_template.trim().length > 0
-          : a.query_id
+          : a.action_type === 'post_action_only'
+            ? !!a.display_name && !!a.post_action_pulse_id
+            : a.query_id
     );
     const { error } = await saveActions(cellId, validActions);
     if (!error) {
@@ -407,6 +413,7 @@ export default function ActionsConfigModal({
     : [];
 
   return (
+    <>
     <Modal isOpen={isOpen} onClose={onClose} title="Cell Actions" size="2xl">
       <div className="space-y-3">
         {!cellId && (
@@ -482,13 +489,21 @@ export default function ActionsConfigModal({
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
                               : action.action_type === 'run_report'
                                 ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
-                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                                : action.action_type === 'post_action_only'
+                                  ? 'text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30'
+                                  : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : 'Exe'}
+                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : action.action_type === 'post_action_only' ? 'Pao' : 'Exe'}
                         </span>
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate">
+                        <span className={`text-xs truncate ${action.is_hidden ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}`}>
                           {action.display_name || '(unnamed)'}
                         </span>
+                        {action.is_hidden && (
+                          <span className="ml-auto shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-0.5">
+                            <EyeOff className="w-2.5 h-2.5" />
+                            HIDDEN
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -512,13 +527,21 @@ export default function ActionsConfigModal({
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
                               : action.action_type === 'run_report'
                                 ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
-                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                                : action.action_type === 'post_action_only'
+                                  ? 'text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30'
+                                  : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : 'Exe'}
+                          {action.action_type === 'popup' ? 'Pop' : action.action_type === 'link' ? 'Lnk' : action.action_type === 'run_report' ? 'Rpt' : action.action_type === 'post_action_only' ? 'Pao' : 'Exe'}
                         </span>
-                        <span className="text-xs text-gray-700 dark:text-gray-300 truncate">
+                        <span className={`text-xs truncate ${action.is_hidden ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}`}>
                           {action.display_name || '(unnamed)'}
                         </span>
+                        {action.is_hidden && (
+                          <span className="ml-auto shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-0.5">
+                            <EyeOff className="w-2.5 h-2.5" />
+                            HIDDEN
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -583,16 +606,24 @@ export default function ActionsConfigModal({
                               ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30'
                               : action.action_type === 'run_report'
                                 ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/30'
-                                : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
+                                : action.action_type === 'post_action_only'
+                                  ? 'text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30'
+                                  : 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30'
                         }`}>
-                          {action.action_type === 'popup' ? 'Popup' : action.action_type === 'link' ? 'Link' : action.action_type === 'run_report' ? 'Run Report' : 'Execute'}
+                          {action.action_type === 'popup' ? 'Popup' : action.action_type === 'link' ? 'Link' : action.action_type === 'run_report' ? 'Run Report' : action.action_type === 'post_action_only' ? 'Post-Action Only' : 'Execute'}
                         </span>
                         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                           {action.display_name || `Action ${index + 1}`}
                         </span>
+                        {action.is_hidden && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                            <EyeOff className="w-3 h-3" />
+                            Hidden from users
+                          </span>
+                        )}
                       </div>
                       <button
-                        onClick={() => handleRemoveAction(index)}
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteIndex(index); }}
                         className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                         title="Delete action"
                       >
@@ -611,16 +642,19 @@ export default function ActionsConfigModal({
                             value={action.action_type}
                             onChange={(val) => handleUpdateAction(index, {
                               action_type: val as ActionType,
-                              query_id: (val === 'popup' || val === 'link') ? '' : action.query_id,
+                              query_id: (val === 'popup' || val === 'link' || val === 'post_action_only') ? '' : action.query_id,
                               popup_template: val === 'popup' ? action.popup_template : '',
                               link_url_template: val === 'link' ? action.link_url_template : '',
-                              parameter_mappings: val === 'link' ? extractLinkParams(action.link_url_template).map(p => ({ parameterName: p, target: 'column' as const, columnName: '', hardcodeValue: '', valueType: 'text' as const })) : (val === 'popup' ? [] : action.parameter_mappings),
+                              parameter_mappings: val === 'link'
+                                ? extractLinkParams(action.link_url_template).map(p => ({ parameterName: p, target: 'column' as const, columnName: '', hardcodeValue: '', valueType: 'text' as const }))
+                                : (val === 'popup' || val === 'post_action_only' ? [] : action.parameter_mappings),
                             })}
                             options={[
                               { value: 'execute', label: 'Execute (API Call)' },
                               { value: 'run_report', label: 'Run Report (Open PDF)' },
                               { value: 'popup', label: 'Popup (Display Info)' },
                               { value: 'link', label: 'Link (Open URL)' },
+                              { value: 'post_action_only', label: 'Post-Action Only (Pulse Only)' },
                             ]}
                             size="sm"
                           />
@@ -655,32 +689,36 @@ export default function ActionsConfigModal({
                         />
                       </div>
 
-                      {(action.action_type === 'execute' || action.action_type === 'run_report') && (
+                      {(action.action_type === 'execute' || action.action_type === 'run_report' || action.action_type === 'post_action_only') && (
                         <>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Action Query
-                            </label>
-                            <CustomDropdown
-                              value={action.query_id}
-                              onChange={(val) => handleQueryChange(index, val)}
-                              options={actionQueries.map(q => ({ value: q.id, label: q.name }))}
-                              placeholder="Select an action query"
-                              size="sm"
-                            />
-                          </div>
+                          {action.action_type !== 'post_action_only' && (
+                            <>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                  Action Query
+                                </label>
+                                <CustomDropdown
+                                  value={action.query_id}
+                                  onChange={(val) => handleQueryChange(index, val)}
+                                  options={actionQueries.map(q => ({ value: q.id, label: q.name }))}
+                                  placeholder="Select an action query"
+                                  size="sm"
+                                />
+                              </div>
 
-                          <div className="flex items-end">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={action.refresh_after_execute}
-                                onChange={(e) => handleUpdateAction(index, { refresh_after_execute: e.target.checked })}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <span className="text-xs text-gray-600 dark:text-gray-400">Refresh after run</span>
-                            </label>
-                          </div>
+                              <div className="flex items-end">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={action.refresh_after_execute}
+                                    onChange={(e) => handleUpdateAction(index, { refresh_after_execute: e.target.checked })}
+                                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                  />
+                                  <span className="text-xs text-gray-600 dark:text-gray-400">Refresh after run</span>
+                                </label>
+                              </div>
+                            </>
+                          )}
 
                           {/* Post-Action Pulse */}
                           <div className="pt-2 border-t border-indigo-200 dark:border-indigo-800">
@@ -695,9 +733,24 @@ export default function ActionsConfigModal({
                             <CustomDropdown
                               value={action.post_action_pulse_id || ''}
                               onChange={(val) => {
+                                if (!val) {
+                                  handleUpdateAction(index, {
+                                    post_action_pulse_id: null,
+                                    pulse_variable_mappings: [],
+                                  });
+                                  return;
+                                }
+                                if (val === action.post_action_pulse_id) return;
+                                const selectedPulse = pulses.find(p => p.id === val);
+                                const inputVars = (selectedPulse?.input_variables || []) as PulseInputVariable[];
+                                const seeded: PulseVariableMapping[] = inputVars.map(v => ({
+                                  variableName: v.name,
+                                  source: 'column',
+                                  sourceValue: '',
+                                }));
                                 handleUpdateAction(index, {
-                                  post_action_pulse_id: val || null,
-                                  pulse_variable_mappings: val ? (action.pulse_variable_mappings || []) : [],
+                                  post_action_pulse_id: val,
+                                  pulse_variable_mappings: seeded,
                                 });
                               }}
                               options={[
@@ -906,7 +959,7 @@ export default function ActionsConfigModal({
                           </div>
 
                           {/* Prompt Dialog Customization */}
-                          {(action.action_type === 'execute' || action.action_type === 'run_report') && (
+                          {(action.action_type === 'execute' || action.action_type === 'run_report' || action.action_type === 'post_action_only') && (
                             <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                                 Prompt Dialog <span className="font-normal text-gray-400">(optional)</span>
@@ -930,7 +983,7 @@ export default function ActionsConfigModal({
                             </div>
                           )}
 
-                          {userParams.length > 0 && (
+                          {action.action_type !== 'post_action_only' && userParams.length > 0 && (
                             <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
                               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                                 Parameter Mappings
@@ -1766,6 +1819,28 @@ export default function ActionsConfigModal({
                       {/* Mobile Visibility */}
                       <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
                         <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                          <EyeOff className="w-3.5 h-3.5 text-gray-500" />
+                          Visibility
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={action.is_hidden}
+                            onChange={(e) => handleUpdateAction(index, { is_hidden: e.target.checked })}
+                            className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
+                          />
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
+                            Hide this action from users
+                          </span>
+                        </label>
+                        <p className="mt-1 ml-6 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                          Hidden actions stay editable here but do not appear in the right-click menu, action buttons, or drilldown menus. Use this to park work-in-progress or temporarily broken actions.
+                        </p>
+                      </div>
+
+                      {/* Mobile Visibility */}
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                           <Smartphone className="w-3.5 h-3.5 text-gray-500" />
                           Mobile App
                         </label>
@@ -1912,5 +1987,38 @@ export default function ActionsConfigModal({
         </div>
       )}
     </Modal>
+    <Modal
+      isOpen={confirmDeleteIndex !== null}
+      onClose={() => setConfirmDeleteIndex(null)}
+      title="Delete Action?"
+      size="sm"
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-gray-700 dark:text-gray-300">
+          Are you sure you want to delete{' '}
+          <span className="font-semibold">
+            {confirmDeleteIndex !== null
+              ? (actions[confirmDeleteIndex]?.display_name || `Action ${confirmDeleteIndex + 1}`)
+              : ''}
+          </span>
+          ? This can't be undone once you save.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmDeleteIndex(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (confirmDeleteIndex !== null) handleRemoveAction(confirmDeleteIndex);
+              setConfirmDeleteIndex(null);
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
