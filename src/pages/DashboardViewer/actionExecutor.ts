@@ -465,7 +465,7 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function triggerPostActionPulse(
+export async function triggerPostActionPulse(
   action: DashboardCellActionWithQuery,
   rowData: Record<string, unknown>,
   promptValues?: Record<string, string>,
@@ -641,4 +641,43 @@ export function executeLinkAction(
   });
 
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+export async function executePostActionOnlyForRows(
+  action: DashboardCellActionWithQuery,
+  rows: Record<string, unknown>[],
+  onProgress?: ActionProgressCallback,
+  promptValues?: Record<string, string>,
+  dashboardParamValues?: Record<string, string>
+): Promise<ActionExecutionResult> {
+  if (rows.length === 0) {
+    return { success: 0, failed: 0, pulseTriggered: 0, errors: [] };
+  }
+  if (!action.post_action_pulse_id) {
+    return { success: 0, failed: rows.length, pulseTriggered: 0, errors: ['No pulse configured for this action'] };
+  }
+
+  let success = 0;
+  let failed = 0;
+  let pulseTriggered = 0;
+  const errors: string[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    onProgress?.(i + 1, rows.length);
+    const result = await triggerPostActionPulse(action, rows[i], promptValues, dashboardParamValues);
+    if (result.ok) {
+      success++;
+      pulseTriggered++;
+    } else {
+      failed++;
+      if (result.error && !errors.includes(result.error)) {
+        errors.push(result.error);
+      }
+    }
+    if (i < rows.length - 1) {
+      await delay(MULTI_ROW_DELAY_MS);
+    }
+  }
+
+  return { success, failed, pulseTriggered, errors };
 }
