@@ -665,6 +665,7 @@ export interface Database {
           show_on_mobile: boolean;
           requires_confirmation: boolean;
           confirmation_message: string | null;
+          is_hidden: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -687,6 +688,7 @@ export interface Database {
           show_on_mobile?: boolean;
           requires_confirmation?: boolean;
           confirmation_message?: string | null;
+          is_hidden?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -709,6 +711,7 @@ export interface Database {
           show_on_mobile?: boolean;
           requires_confirmation?: boolean;
           confirmation_message?: string | null;
+          is_hidden?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -1118,6 +1121,9 @@ export interface PulseEmailStepConfig {
   columnAliases?: Record<string, string>;
   columnFormats?: Record<string, string>;
   includeHeaderRow?: boolean;
+  attachedReportNodeIds?: string[];
+  attachmentMode?: 'separate' | 'combined';
+  combinedAttachmentFilename?: string;
 }
 
 export interface PulseActionStepConfig {
@@ -1137,12 +1143,118 @@ export interface PulseActionStepConfig {
   retryCount?: number;
 }
 
+export interface PulseRunReportStepConfig {
+  stepType: 'run_report';
+  name: string;
+  stepName: string;
+  queryId?: string;
+  actionName?: string;
+  responseVariableName: string;
+  attachmentFilename?: string;
+  parameterMappings: Array<{
+    paramName: string;
+    source: 'query_column' | 'query_field' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+    sourceValue: string;
+    sourceNodeId?: string;
+  }>;
+  pathVariableMappings?: Array<{
+    variableName: string;
+    source: 'query_column' | 'query_field' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+    sourceValue: string;
+    sourceNodeId?: string;
+  }>;
+  queryParameterMappings?: Array<{
+    paramName: string;
+    source: 'query_column' | 'query_field' | 'hardcoded' | 'input_variable' | 'fixed_value' | 'date_function';
+    sourceValue: string;
+    sourceNodeId?: string;
+  }>;
+  timeout?: number;
+  retryCount?: number;
+}
+
+export type ImagingMappingSource =
+  | 'query_column'
+  | 'query_field'
+  | 'hardcoded'
+  | 'input_variable'
+  | 'fixed_value'
+  | 'date_function';
+
+export interface ImagingSendMetadataMapping {
+  fieldName: string;
+  source: ImagingMappingSource;
+  sourceValue: string;
+  sourceNodeId?: string;
+}
+
+export interface ImagingSendValueMapping {
+  source: ImagingMappingSource;
+  sourceValue: string;
+  sourceNodeId?: string;
+}
+
+export interface PulseImagingStepConfig {
+  stepType: 'imaging';
+  name: string;
+  stepName: string;
+  mode?: 'receive' | 'send';
+  vendorId?: string;
+  lookupBy: 'bill_number' | 'detail_line_id';
+  documentTypeId?: string;
+  bucketId?: string;
+  attachmentFilename?: string;
+  responseVariableName: string;
+  lookupMappings: Array<{
+    field: 'bill_number' | 'detail_line_id';
+    source: ImagingMappingSource;
+    sourceValue: string;
+    sourceNodeId?: string;
+  }>;
+  sendConfig?: {
+    sourcePdfNodeId?: string;
+    billNumberMapping?: ImagingSendValueMapping;
+    detailLineIdMapping?: ImagingSendValueMapping;
+    originalFilename?: string;
+    metadataMappings?: ImagingSendMetadataMapping[];
+  };
+}
+
+export interface ImagingVendor {
+  id: string;
+  company_id: string;
+  name: string;
+  vendor_type: string;
+  supabase_url: string;
+  anon_key: string;
+  default_bucket_id: string | null;
+  notes: string | null;
+  send_api_key: string | null;
+  send_bucket_id: string | null;
+  send_default_document_type_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImagingDocumentType {
+  id: string;
+  vendor_id: string;
+  remote_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export type PulseStepConfig =
   | PulseTriggerStepConfig
   | PulseQueryStepConfig
   | PulseConditionStepConfig
   | PulseEmailStepConfig
-  | PulseActionStepConfig;
+  | PulseActionStepConfig
+  | PulseRunReportStepConfig
+  | PulseImagingStepConfig;
 
 export type ProjectWithDashboards = Project & {
   dashboards: Dashboard[];
@@ -1256,7 +1368,7 @@ export interface ActionOptionsFilter {
   defaultAllowedValues?: string[];
 }
 
-export type ActionType = 'execute' | 'popup' | 'link' | 'run_report';
+export type ActionType = 'execute' | 'popup' | 'link' | 'run_report' | 'post_action_only';
 
 export type ActionVisibilityOperator = 'is_not_empty' | 'is_empty' | 'equals' | 'not_equals' | 'contains' | 'greater_than' | 'less_than';
 
