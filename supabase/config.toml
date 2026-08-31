@@ -1,0 +1,2 @@
+[functions.pulse-runner]
+verify_jwt = true
