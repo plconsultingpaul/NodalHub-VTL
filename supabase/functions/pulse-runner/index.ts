@@ -1951,8 +1951,38 @@ Deno.serve(async (req: Request) => {
                     return _m;
                   });
                 };
-                const finalSubject = substituteInputVars(resolvedSubject);
-                const finalBody = substituteInputVars(resolvedBody);
+
+                // Substitute {ColumnName} / {{ColumnName}} tokens from the current iteration's rows.
+                // Reserved tokens are handled by resolveTokens above and must not be overwritten.
+                const RESERVED_TOKENS = new Set(["pulse_name", "date", "group", "row_count", "results_table"]);
+                const rowContext: Record<string, string> = {};
+                if (rows.length > 0) {
+                  const representative = rows[0];
+                  for (const key of Object.keys(representative)) {
+                    const val = representative[key];
+                    if (val === null || val === undefined) continue;
+                    rowContext[key] = String(val);
+                  }
+                }
+                const substituteRowColumns = (text: string): string => {
+                  if (Object.keys(rowContext).length === 0) return text;
+                  return text
+                    .replace(/\{\{([^{}]+?)\}\}/g, (m, name) => {
+                      const key = String(name).trim();
+                      if (RESERVED_TOKENS.has(key)) return m;
+                      if (key in rowContext) return rowContext[key];
+                      return m;
+                    })
+                    .replace(/\{([^{}]+?)\}/g, (m, name) => {
+                      const key = String(name).trim();
+                      if (RESERVED_TOKENS.has(key)) return m;
+                      if (key in rowContext) return rowContext[key];
+                      return m;
+                    });
+                };
+
+                const finalSubject = substituteRowColumns(substituteInputVars(resolvedSubject));
+                const finalBody = substituteRowColumns(substituteInputVars(resolvedBody));
 
                 // Build attachments: tabular data + upstream PDF reports
                 const attachments: EmailAttachment[] = [];
