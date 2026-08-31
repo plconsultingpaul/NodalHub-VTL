@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type KeyboardEvent, type RefObject } from 'react';
-import { Mail, X, Users, Paperclip, Braces, Table, ChevronUp, ChevronDown, Pencil } from 'lucide-react';
+import { Mail, X, Users, Paperclip, Braces, Table, ChevronUp, ChevronDown, Pencil, FileText } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../contexts/AuthContext';
 import CustomDropdown from '../../../components/ui/CustomDropdown';
@@ -11,6 +11,7 @@ interface EmailConfigPanelProps {
   config: PulseEmailStepConfig | null;
   onChange: (config: PulseEmailStepConfig) => void;
   upstreamNodes?: { id: string; label: string; queryId?: string }[];
+  upstreamReportNodes?: { id: string; label: string; responseVariableName: string; attachmentFilename?: string }[];
   inputVariables?: PulseInputVariable[];
 }
 
@@ -718,7 +719,7 @@ function ResultsTableModal({
   );
 }
 
-export default function EmailConfigPanel({ config, onChange, upstreamNodes, inputVariables }: EmailConfigPanelProps) {
+export default function EmailConfigPanel({ config, onChange, upstreamNodes, upstreamReportNodes, inputVariables }: EmailConfigPanelProps) {
   const { activeCompany } = useAuth();
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [contacts, setContacts] = useState<ContactEntry[]>([]);
@@ -1061,6 +1062,92 @@ export default function EmailConfigPanel({ config, onChange, upstreamNodes, inpu
           </div>
         )}
       </div>
+
+      {/* PDF Report Attachments */}
+      {upstreamReportNodes && upstreamReportNodes.length > 0 && (
+        <div className="p-3 bg-gray-50 dark:bg-gray-700/40 rounded-lg space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <FileText className="w-3 h-3 text-gray-500 dark:text-gray-400" />
+              <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                PDF Attachments From Upstream Steps
+              </span>
+            </div>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">
+              {(current.attachedReportNodeIds || []).length} of {upstreamReportNodes.length} selected
+            </span>
+          </div>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400">
+            Attach PDFs produced by upstream Run Report or Imaging steps.
+          </p>
+          <div className="space-y-1">
+            {upstreamReportNodes.map((rn) => {
+              const selected = (current.attachedReportNodeIds || []).includes(rn.id);
+              return (
+                <label
+                  key={rn.id}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-md cursor-pointer transition-colors ${
+                    selected
+                      ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20'
+                      : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:border-rose-200 dark:hover:border-rose-800'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => {
+                      const cur = current.attachedReportNodeIds || [];
+                      const next = selected ? cur.filter(id => id !== rn.id) : [...cur, rn.id];
+                      emit({ attachedReportNodeIds: next });
+                    }}
+                    className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-900 dark:text-white truncate">{rn.label}</p>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-mono truncate">
+                      {rn.attachmentFilename || `${rn.label || 'report'}.pdf`}
+                      {rn.responseVariableName && (
+                        <span className="text-rose-500 dark:text-rose-400 ml-1.5">{`{{${rn.responseVariableName}}}`}</span>
+                      )}
+                    </p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          {(current.attachedReportNodeIds || []).length > 0 && (
+            <div className="pt-2 border-t border-gray-200 dark:border-gray-600 space-y-2">
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">Attachment Mode</label>
+                <CustomDropdown
+                  value={current.attachmentMode || 'separate'}
+                  onChange={(val) => emit({ attachmentMode: val as 'separate' | 'combined' })}
+                  options={[
+                    { value: 'separate', label: 'Send as separate PDFs' },
+                    { value: 'combined', label: 'Combine into one PDF' },
+                  ]}
+                />
+              </div>
+              {current.attachmentMode === 'combined' && (
+                <div>
+                  <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">Combined Filename</label>
+                  <input
+                    type="text"
+                    value={current.combinedAttachmentFilename || ''}
+                    onChange={(e) => emit({ combinedAttachmentFilename: e.target.value })}
+                    placeholder="combined_{pulse_name}_{date}.pdf"
+                    className="w-full px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+                    Supports {'{date}'}, {'{pulse_name}'}, and {'{{inputVariable}}'} tokens.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Attachment */}
       <div className="p-3 bg-gray-50 dark:bg-gray-700/40 rounded-lg space-y-2.5">
