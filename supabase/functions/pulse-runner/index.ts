@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as XLSX from "npm:xlsx@0.18.5";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -395,6 +396,12 @@ const getGmailToken = async (credentials: {
   return json.access_token;
 };
 
+interface EmailAttachment {
+  name: string;
+  contentType: string;
+  base64: string;
+}
+
 interface SendEmailArgs {
   fromEmail: string;
   token: string;
@@ -404,7 +411,7 @@ interface SendEmailArgs {
   subject: string;
   body: string;
   isHtml?: boolean;
-  attachment?: { name: string; contentType: string; base64: string };
+  attachments?: EmailAttachment[];
 }
 
 const sendO365Email = async (args: SendEmailArgs): Promise<void> => {
@@ -415,15 +422,13 @@ const sendO365Email = async (args: SendEmailArgs): Promise<void> => {
     ccRecipients: args.cc.map((a) => ({ emailAddress: { address: a } })),
     bccRecipients: args.bcc.map((a) => ({ emailAddress: { address: a } })),
   };
-  if (args.attachment) {
-    message.attachments = [
-      {
-        "@odata.type": "#microsoft.graph.fileAttachment",
-        name: args.attachment.name,
-        contentType: args.attachment.contentType,
-        contentBytes: args.attachment.base64,
-      },
-    ];
+  if (args.attachments && args.attachments.length > 0) {
+    message.attachments = args.attachments.map((att) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: att.name,
+      contentType: att.contentType,
+      contentBytes: att.base64,
+    }));
   }
   const res = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(args.fromEmail)}/sendMail`,
@@ -458,19 +463,23 @@ const buildRfc2822 = (args: SendEmailArgs): string => {
   lines.push("MIME-Version: 1.0");
   const bodyContentType = args.isHtml ? "text/html; charset=UTF-8" : "text/plain; charset=UTF-8";
 
-  if (args.attachment) {
+  const hasAttachments = !!(args.attachments && args.attachments.length > 0);
+  if (hasAttachments) {
     lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
     lines.push("");
     lines.push(`--${boundary}`);
     lines.push(`Content-Type: ${bodyContentType}`);
     lines.push("");
     lines.push(args.body);
-    lines.push(`--${boundary}`);
-    lines.push(`Content-Type: ${args.attachment.contentType}; name="${args.attachment.name}"`);
-    lines.push("Content-Transfer-Encoding: base64");
-    lines.push(`Content-Disposition: attachment; filename="${args.attachment.name}"`);
-    lines.push("");
-    lines.push(args.attachment.base64);
+    for (const att of args.attachments!) {
+      const safeName = att.name.replace(/"/g, "");
+      lines.push(`--${boundary}`);
+      lines.push(`Content-Type: ${att.contentType}; name="${safeName}"`);
+      lines.push("Content-Transfer-Encoding: base64");
+      lines.push(`Content-Disposition: attachment; filename="${safeName}"`);
+      lines.push("");
+      lines.push(att.base64);
+    }
     lines.push(`--${boundary}--`);
   } else {
     lines.push(`Content-Type: ${bodyContentType}`);
@@ -504,6 +513,46 @@ const sendGmailEmail = async (args: SendEmailArgs): Promise<void> => {
   }
 };
 
+const base64ToUint8Array = (b64: string): Uint8Array => {
+  const cleaned = b64.replace(/^data:[^;]+;base64,/i, "").replace(/\s+/g, "");
+  const bin = atob(cleaned);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+
+const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)) as unknown as number[]);
+  }
+  return btoa(binary);
+};
+
+const hasPdfMagicNumber = (bytes: Uint8Array): boolean => {
+  if (bytes.length < 5) return false;
+  return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+};
+
+const extractPdfBytesFromJsonEnvelope = (text: string): Uint8Array | null => {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const candidateKeys = ["reportData", "pdfData", "data", "pdf", "content", "body", "fileContent", "base64"];
+  for (const key of candidateKeys) {
+    const val = obj[key];
+    if (typeof val === "string" && val.length > 20) {
+      try {
+        const bytes = base64ToUint8Array(val);
+        if (hasPdfMagicNumber(bytes)) return bytes;
+      } catch { /* try next */ }
+    }
+  }
+  return null;
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -515,6 +564,7 @@ Deno.serve(async (req: Request) => {
 
   let executionId: string | null = null;
   let pulseId: string | null = null;
+  const stepResultsShared: Array<Record<string, unknown>> = [];
 
   try {
     const { pulseId: reqPulseId, triggerSource = "manual", input_variables: inputVars, triggered_by }: RunRequest = await req.json();
@@ -585,7 +635,7 @@ Deno.serve(async (req: Request) => {
       if (Object.keys(inputVariables).length > 0) {
         context["var"] = inputVariables;
       }
-      const stepResults: Array<Record<string, unknown>> = [];
+      const stepResults: Array<Record<string, unknown>> = stepResultsShared;
 
       // BFS/topological execution following edges
       const executeNode = async (nodeId: string): Promise<void> => {
@@ -1000,6 +1050,790 @@ Deno.serve(async (req: Request) => {
             }
             throw err;
           }
+        } else if (node.type === "run_report" && config) {
+          try {
+            const queryId = config.queryId as string;
+            const responseVariableName = (config.responseVariableName as string) || "";
+            if (!queryId) throw new Error("Run Report step has no report action configured");
+            if (!responseVariableName) throw new Error("Run Report step has no output variable name");
+
+            const { data: reportQuery, error: rqErr } = await admin
+              .from("queries")
+              .select("*, api_endpoints(*)")
+              .eq("id", queryId)
+              .maybeSingle();
+            if (rqErr || !reportQuery) throw new Error(rqErr?.message || "Report action query not found");
+            const reportEndpoint = reportQuery.api_endpoints as Record<string, unknown> | null;
+            if (!reportEndpoint) throw new Error("Report action has no API endpoint");
+
+            const paramMappings = (config.parameterMappings || []) as Array<{
+              paramName: string;
+              source: string;
+              sourceValue: string;
+              sourceNodeId?: string;
+            }>;
+
+            const pathVariableMappings = (config.pathVariableMappings || []) as Array<{
+              variableName: string;
+              source: string;
+              sourceValue: string;
+              sourceNodeId?: string;
+            }>;
+
+            const queryParameterMappings = (config.queryParameterMappings || []) as Array<{
+              paramName: string;
+              source: string;
+              sourceValue: string;
+              sourceNodeId?: string;
+            }>;
+
+            const resolveMappingValue = async (source: string, sourceValue: string): Promise<string> => {
+              switch (source) {
+                case "hardcoded":
+                  return sourceValue || "";
+                case "input_variable":
+                  return inputVariables[sourceValue] || "";
+                case "query_column":
+                case "query_field": {
+                  const [varName, colName] = (sourceValue || "").split("::");
+                  const ctxData = context[varName];
+                  if (ctxData) {
+                    const rows = flattenRows(ctxData);
+                    if (rows.length > 0 && colName) {
+                      return String(rows[0][colName] ?? "");
+                    }
+                  }
+                  return "";
+                }
+                case "fixed_value": {
+                  if (!sourceValue) return "";
+                  const { data: fv } = await admin
+                    .from("fixed_values")
+                    .select("value, resolved_value")
+                    .eq("id", sourceValue)
+                    .maybeSingle();
+                  return fv?.resolved_value || fv?.value || "";
+                }
+                case "date_function": {
+                  if (sourceValue && sourceValue.startsWith(DATE_FUNCTION_PREFIX)) {
+                    const fnId = sourceValue.slice(DATE_FUNCTION_PREFIX.length);
+                    const { data: fn } = await admin
+                      .from("date_functions")
+                      .select("base_date, string_format, adjust_years, adjust_months, adjust_days")
+                      .eq("id", fnId)
+                      .maybeSingle();
+                    if (fn) {
+                      return computeDateFunctionValue(
+                        fn.base_date as string,
+                        fn.string_format as string,
+                        fn.adjust_years as number,
+                        fn.adjust_months as number,
+                        fn.adjust_days as number
+                      );
+                    }
+                  }
+                  return sourceValue || "";
+                }
+                default:
+                  return sourceValue || "";
+              }
+            };
+
+            const applyInputVarSubstitution = (val: string): string => {
+              if (Object.keys(inputVariables).length === 0) return val;
+              return val.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                if (varName in inputVariables) return inputVariables[varName];
+                return _m;
+              });
+            };
+
+            const reportParamValues: Record<string, string> = {};
+            for (const mapping of paramMappings) {
+              const paramKey = mapping.paramName.startsWith("@") ? mapping.paramName : `@${mapping.paramName}`;
+              switch (mapping.source) {
+                case "hardcoded":
+                  reportParamValues[paramKey] = mapping.sourceValue || "";
+                  break;
+                case "input_variable":
+                  reportParamValues[paramKey] = inputVariables[mapping.sourceValue] || "";
+                  break;
+                case "query_column":
+                case "query_field": {
+                  const [varName, colName] = (mapping.sourceValue || "").split("::");
+                  const ctxData = context[varName];
+                  if (ctxData) {
+                    const rows = flattenRows(ctxData);
+                    if (rows.length > 0 && colName) {
+                      reportParamValues[paramKey] = String(rows[0][colName] ?? "");
+                    } else {
+                      reportParamValues[paramKey] = "";
+                    }
+                  } else {
+                    reportParamValues[paramKey] = "";
+                  }
+                  break;
+                }
+                case "fixed_value": {
+                  if (mapping.sourceValue) {
+                    const { data: fv } = await admin
+                      .from("fixed_values")
+                      .select("value, resolved_value")
+                      .eq("id", mapping.sourceValue)
+                      .maybeSingle();
+                    reportParamValues[paramKey] = fv?.resolved_value || fv?.value || "";
+                  } else {
+                    reportParamValues[paramKey] = "";
+                  }
+                  break;
+                }
+                case "date_function": {
+                  if (mapping.sourceValue && mapping.sourceValue.startsWith(DATE_FUNCTION_PREFIX)) {
+                    const fnId = mapping.sourceValue.slice(DATE_FUNCTION_PREFIX.length);
+                    const { data: fn } = await admin
+                      .from("date_functions")
+                      .select("base_date, string_format, adjust_years, adjust_months, adjust_days")
+                      .eq("id", fnId)
+                      .maybeSingle();
+                    if (fn) {
+                      reportParamValues[paramKey] = computeDateFunctionValue(
+                        fn.base_date as string,
+                        fn.string_format as string,
+                        fn.adjust_years as number,
+                        fn.adjust_months as number,
+                        fn.adjust_days as number
+                      );
+                    } else {
+                      reportParamValues[paramKey] = "";
+                    }
+                  } else {
+                    reportParamValues[paramKey] = mapping.sourceValue || "";
+                  }
+                  break;
+                }
+                default:
+                  reportParamValues[paramKey] = mapping.sourceValue || "";
+              }
+            }
+
+            if (Object.keys(inputVariables).length > 0) {
+              for (const [key, val] of Object.entries(reportParamValues)) {
+                reportParamValues[key] = val.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                  if (varName in inputVariables) return inputVariables[varName];
+                  return _m;
+                });
+              }
+            }
+
+            const resolvedPathVariables: Record<string, string> = {};
+            for (const mapping of pathVariableMappings) {
+              const raw = await resolveMappingValue(mapping.source, mapping.sourceValue);
+              resolvedPathVariables[mapping.variableName] = applyInputVarSubstitution(raw);
+            }
+
+            const originalQueryParams = ((reportQuery.query_parameters || []) as QueryParameter[]) || [];
+            const overrides = new Map<string, string>();
+            for (const mapping of queryParameterMappings) {
+              const raw = await resolveMappingValue(mapping.source, mapping.sourceValue);
+              overrides.set(mapping.paramName, applyInputVarSubstitution(raw));
+            }
+            const effectiveQueryParams: QueryParameter[] = originalQueryParams.map((p) => {
+              if (p && overrides.has(p.key)) {
+                return { ...p, value: overrides.get(p.key) ?? "" };
+              }
+              return p;
+            });
+
+            const reportUrl = buildQueryUrl(
+              reportEndpoint.url as string,
+              reportQuery.api_sub_path || "",
+              effectiveQueryParams,
+              reportQuery.url_query_string || "",
+              reportParamValues,
+              resolvedPathVariables
+            );
+            const reportHeaders = buildAuthHeaders(reportEndpoint);
+            const reportFetchOptions: RequestInit = { method: reportQuery.http_method, headers: reportHeaders };
+            if (["POST", "PUT", "PATCH"].includes(reportQuery.http_method)) {
+              if (reportQuery.request_body_template) {
+                try {
+                  const body = JSON.parse(reportQuery.request_body_template);
+                  const mappings = (reportQuery.request_body_field_mappings || []) as Array<{ fieldName: string; value: string; type: string; dataType: string }>;
+                  mappings.forEach((m) => {
+                    let resolvedValue = m.value;
+                    if (m.type === "parameter" && m.value) {
+                      resolvedValue = reportParamValues[m.value] || "";
+                    } else if (m.type === "hardcoded") {
+                      resolvedValue = substituteParams(resolvedValue, reportParamValues);
+                    }
+                    if (Object.keys(inputVariables).length > 0) {
+                      resolvedValue = resolvedValue.replace(/\{\{(.+?)\}\}/g, (_match, vName) => {
+                        if (vName in inputVariables) return inputVariables[vName];
+                        return _match;
+                      });
+                    }
+                    setNestedValue(body, m.fieldName, convertFieldValue(resolvedValue, m.dataType));
+                  });
+                  reportFetchOptions.body = JSON.stringify(body);
+                } catch { /* fall through */ }
+              }
+              if (!reportFetchOptions.body && reportQuery.json_parameters && Object.keys(reportQuery.json_parameters).length) {
+                reportFetchOptions.body = substituteParams(JSON.stringify(reportQuery.json_parameters), reportParamValues);
+              }
+              if (!reportFetchOptions.body && (reportEndpoint.endpoint_type === "nodal_connect" || reportQuery.nodal_db_connection_id)) {
+                const inputs: Record<string, string> = {};
+                Object.entries(reportParamValues).forEach(([key, val]) => {
+                  inputs[key.replace(/^@/, "")] = val;
+                });
+                reportFetchOptions.body = JSON.stringify({ name: reportQuery.name, inputs });
+              }
+            }
+
+            console.log(`[pulse-runner] Run Report step "${stepName}": ${reportQuery.http_method} ${reportUrl}`);
+            const reportRes = await fetch(reportUrl, reportFetchOptions);
+
+            if (!reportRes.ok) {
+              const errText = await reportRes.text();
+              throw new Error(`Report fetch failed (${reportRes.status}): ${errText.slice(0, 300)}`);
+            }
+
+            const contentType = reportRes.headers.get("content-type") || "";
+            let pdfBytes: Uint8Array | null = null;
+
+            if (contentType.toLowerCase().includes("application/pdf")) {
+              const buf = new Uint8Array(await reportRes.arrayBuffer());
+              if (hasPdfMagicNumber(buf)) {
+                pdfBytes = buf;
+              } else {
+                throw new Error("Report response advertised application/pdf but did not contain a valid PDF");
+              }
+            } else {
+              const text = await reportRes.text();
+              const trimmed = text.trimStart();
+              if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                pdfBytes = extractPdfBytesFromJsonEnvelope(text);
+                if (!pdfBytes) {
+                  throw new Error("Report JSON response did not contain a base64 PDF field");
+                }
+              } else {
+                try {
+                  const bytes = base64ToUint8Array(text);
+                  if (hasPdfMagicNumber(bytes)) pdfBytes = bytes;
+                } catch { /* fall through */ }
+                if (!pdfBytes) {
+                  throw new Error("Report response was not a PDF or recognised JSON envelope");
+                }
+              }
+            }
+
+            const today = new Date().toISOString().slice(0, 10);
+            const rawFilename = applyInputVarSubstitution(
+              (config.attachmentFilename as string) || `${(config.stepName as string) || responseVariableName || "report"}.pdf`
+            )
+              .replace(/\{date\}/g, today)
+              .replace(/\{pulse_name\}/g, pulse.name);
+            const finalFilename = rawFilename.toLowerCase().endsWith(".pdf") ? rawFilename : `${rawFilename}.pdf`;
+
+            const base64 = uint8ArrayToBase64(pdfBytes);
+            context[responseVariableName] = {
+              __type: "pdf_attachment",
+              filename: finalFilename,
+              contentType: "application/pdf",
+              base64,
+              byteSize: pdfBytes.length,
+            };
+
+            stepResults.push({
+              nodeId, name: stepName, type: "run_report", status: "success",
+              inputs: { url: reportUrl, method: reportQuery.http_method, parameters: reportParamValues },
+              outputs: { variableName: responseVariableName, filename: finalFilename, byteSize: pdfBytes.length },
+              startedAt: stepStart, finishedAt: new Date().toISOString(),
+            });
+
+            const nextEdges = adjacency.get(nodeId) || [];
+            for (const edge of nextEdges) {
+              await executeNode(edge.target);
+            }
+          } catch (err) {
+            const existingResult = stepResults.find(s => s.nodeId === nodeId);
+            if (!existingResult) {
+              stepResults.push({ nodeId, name: stepName, type: "run_report", status: "error", error: err instanceof Error ? err.message : String(err), startedAt: stepStart, finishedAt: new Date().toISOString() });
+            }
+            throw err;
+          }
+        } else if (node.type === "imaging" && config) {
+          const imgMode = (config.mode as string) || "receive";
+          if (imgMode === "send") {
+            try {
+              const vendorId = config.vendorId as string;
+              const responseVariableName = (config.responseVariableName as string) || "";
+              const documentTypeId = config.documentTypeId as string;
+              const bucketId = config.bucketId as string;
+              const sendCfg = (config.sendConfig || {}) as Record<string, unknown>;
+              const sourcePdfNodeId = sendCfg.sourcePdfNodeId as string | undefined;
+
+              if (!vendorId) throw new Error("Imaging (send) step has no vendor configured");
+              if (!bucketId) throw new Error("Imaging (send) step has no bucket configured");
+              if (!responseVariableName) throw new Error("Imaging (send) step has no output variable name");
+              if (!sourcePdfNodeId) throw new Error("Imaging (send) step has no source PDF step selected");
+
+              const { data: vendor, error: vendorErr } = await admin
+                .from("imaging_vendors")
+                .select("id, name, supabase_url, send_api_key, send_bucket_id")
+                .eq("id", vendorId)
+                .maybeSingle();
+              if (vendorErr || !vendor) throw new Error(vendorErr?.message || "Imaging vendor not found");
+              if (!vendor.supabase_url) throw new Error("Imaging vendor is missing supabase_url");
+              if (!vendor.send_api_key) throw new Error("Imaging vendor has no Send Ingest API Key configured");
+
+              const sourceNode = Object.entries(stepConfigs).find(([id]) => id === sourcePdfNodeId);
+              const sourceVarName = sourceNode ? ((sourceNode[1] as Record<string, unknown>).responseVariableName as string) : "";
+              const sourcePayload = sourceVarName ? context[sourceVarName] : undefined;
+
+              const skipSend = (reason: string) => {
+                context[responseVariableName] = { __type: "imaging_ingest_skipped", reason };
+                stepResults.push({
+                  nodeId, name: stepName, type: "imaging", status: "skipped", reason,
+                  inputs: { vendorId, bucketId, documentTypeId, sourcePdfNodeId },
+                  outputs: { variableName: responseVariableName },
+                  startedAt: stepStart, finishedAt: new Date().toISOString(),
+                });
+              };
+
+              if (!sourcePayload || (sourcePayload as Record<string, unknown>).__type !== "pdf_attachment") {
+                console.log(`[pulse-runner] Imaging (send) "${stepName}": source PDF not available, skipping`);
+                skipSend("source_pdf_missing");
+                const nextEdges = adjacency.get(nodeId) || [];
+                for (const edge of nextEdges) {
+                  await executeNode(edge.target);
+                }
+                return;
+              }
+
+              const pdf = sourcePayload as { base64: string; filename?: string; byteSize?: number };
+
+              const resolveMappingValue = async (source: string, sourceValue: string): Promise<string> => {
+                switch (source) {
+                  case "hardcoded":
+                    return sourceValue || "";
+                  case "input_variable":
+                    return inputVariables[sourceValue] || "";
+                  case "query_column":
+                  case "query_field": {
+                    const [varName, colName] = (sourceValue || "").split("::");
+                    const ctxData = context[varName];
+                    if (ctxData) {
+                      const rows = flattenRows(ctxData);
+                      if (rows.length > 0 && colName) {
+                        return String(rows[0][colName] ?? "");
+                      }
+                    }
+                    return "";
+                  }
+                  case "fixed_value": {
+                    if (!sourceValue) return "";
+                    const { data: fv } = await admin
+                      .from("fixed_values")
+                      .select("value, resolved_value")
+                      .eq("id", sourceValue)
+                      .maybeSingle();
+                    return fv?.resolved_value || fv?.value || "";
+                  }
+                  case "date_function": {
+                    if (sourceValue && sourceValue.startsWith(DATE_FUNCTION_PREFIX)) {
+                      const fnId = sourceValue.slice(DATE_FUNCTION_PREFIX.length);
+                      const { data: fn } = await admin
+                        .from("date_functions")
+                        .select("base_date, string_format, adjust_years, adjust_months, adjust_days")
+                        .eq("id", fnId)
+                        .maybeSingle();
+                      if (fn) {
+                        return computeDateFunctionValue(
+                          fn.base_date as string,
+                          fn.string_format as string,
+                          fn.adjust_years as number,
+                          fn.adjust_months as number,
+                          fn.adjust_days as number
+                        );
+                      }
+                    }
+                    return sourceValue || "";
+                  }
+                  default:
+                    return sourceValue || "";
+                }
+              };
+
+              const applyInputVarSubstitution = (val: string): string => {
+                if (Object.keys(inputVariables).length === 0) return val;
+                return val.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                  if (varName in inputVariables) return inputVariables[varName];
+                  return _m;
+                });
+              };
+
+              type SendValueMapping = { source: string; sourceValue: string; sourceNodeId?: string };
+              const billMap = sendCfg.billNumberMapping as SendValueMapping | undefined;
+              const detailMap = sendCfg.detailLineIdMapping as SendValueMapping | undefined;
+
+              const rawBill = billMap ? await resolveMappingValue(billMap.source, billMap.sourceValue) : "";
+              const billNumber = applyInputVarSubstitution(rawBill).trim();
+              if (!billNumber) throw new Error("Imaging (send) step could not resolve a Bill Number");
+
+              const rawDetail = detailMap ? await resolveMappingValue(detailMap.source, detailMap.sourceValue) : "";
+              const detailLineId = applyInputVarSubstitution(rawDetail).trim();
+
+              const today = new Date().toISOString().slice(0, 10);
+              const filenameTemplate = (sendCfg.originalFilename as string) || pdf.filename || `document-${billNumber}.pdf`;
+              const filenameSubbed = applyInputVarSubstitution(filenameTemplate)
+                .replace(/\{date\}/g, today)
+                .replace(/\{pulse_name\}/g, pulse.name)
+                .replace(/\{bill_number\}/g, billNumber);
+              const originalFilename = filenameSubbed.toLowerCase().endsWith(".pdf") ? filenameSubbed : `${filenameSubbed}.pdf`;
+
+              const metadataMappings = (sendCfg.metadataMappings || []) as Array<{
+                fieldName: string; source: string; sourceValue: string;
+              }>;
+              const metadata: Record<string, string> = {};
+              for (const m of metadataMappings) {
+                if (!m.fieldName) continue;
+                const raw = await resolveMappingValue(m.source, m.sourceValue);
+                const val = applyInputVarSubstitution(raw);
+                if (val !== "") metadata[m.fieldName] = val;
+              }
+
+              const ingestBody: Record<string, unknown> = {
+                bucketId,
+                billNumber,
+                originalFilename,
+                fileBase64: pdf.base64,
+              };
+              if (documentTypeId) ingestBody.documentTypeId = documentTypeId;
+              if (detailLineId) ingestBody.detailLineId = detailLineId;
+              if (Object.keys(metadata).length > 0) ingestBody.metadata = metadata;
+
+              const ingestUrl = `${(vendor.supabase_url as string).replace(/\/$/, "")}/functions/v1/imaging-ingest`;
+              const apiKey = (vendor.send_api_key as string) || "";
+              const apiKeyPreview = apiKey
+                ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)} (len=${apiKey.length})`
+                : "(empty)";
+              const bodyStr = JSON.stringify(ingestBody);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": vendor=${vendor.name} vendorId=${vendorId}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": supabase_url=${vendor.supabase_url}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": ingestUrl=${ingestUrl}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": send_api_key=${apiKeyPreview}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": bucketId=${bucketId} documentTypeId=${documentTypeId || "(none)"} billNumber=${billNumber} detailLineId=${detailLineId || "(none)"}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": originalFilename=${originalFilename} pdfBytes=${pdf.byteSize ?? "?"} base64Len=${pdf.base64?.length ?? 0} bodyBytes=${bodyStr.length}`);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": metadataKeys=${Object.keys(metadata).join(",") || "(none)"}`);
+
+              if (!apiKey) {
+                throw new Error("Imaging (send) step: vendor has no Send Ingest API Key configured");
+              }
+
+              const ingestRes = await fetch(ingestUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${apiKey}`,
+                },
+                body: bodyStr,
+              });
+
+              const rawResponseText = await ingestRes.text();
+              let ingestJson: Record<string, unknown> | null = null;
+              try {
+                ingestJson = rawResponseText ? JSON.parse(rawResponseText) : null;
+              } catch {
+                ingestJson = null;
+              }
+              const responsePreview = rawResponseText.slice(0, 500);
+              console.log(`[pulse-runner] Imaging (send) "${stepName}": response status=${ingestRes.status} body=${responsePreview}`);
+
+              if (ingestRes.status === 502 && ingestJson?.imagingDocumentId) {
+                context[responseVariableName] = {
+                  __type: "imaging_ingest_result",
+                  imagingDocumentId: ingestJson.imagingDocumentId,
+                  ePdfStatus: "pipeline_failed",
+                  warning: (ingestJson.error as string) || "ePDF pipeline trigger failed",
+                };
+                stepResults.push({
+                  nodeId, name: stepName, type: "imaging", status: "success",
+                  inputs: { vendorId, vendorName: vendor.name, bucketId, documentTypeId, billNumber, detailLineId, originalFilename, byteSize: pdf.byteSize },
+                  outputs: { variableName: responseVariableName, imagingDocumentId: ingestJson.imagingDocumentId, warning: "ePDF pipeline trigger failed" },
+                  startedAt: stepStart, finishedAt: new Date().toISOString(),
+                });
+                const nextEdges = adjacency.get(nodeId) || [];
+                for (const edge of nextEdges) {
+                  await executeNode(edge.target);
+                }
+                return;
+              }
+
+              if (!ingestRes.ok) {
+                const errFromJson = (ingestJson?.error as string) || (ingestJson?.message as string) || "";
+                const detail = errFromJson || responsePreview || `HTTP ${ingestRes.status}`;
+                throw new Error(`Imaging ingest failed (${ingestRes.status}): ${String(detail).slice(0, 500)} | url=${ingestUrl} keyPreview=${apiKeyPreview}`);
+              }
+
+              context[responseVariableName] = {
+                __type: "imaging_ingest_result",
+                imagingDocumentId: ingestJson?.imagingDocumentId,
+                storagePath: ingestJson?.storagePath,
+                cloudConvertJobId: ingestJson?.cloudConvertJobId,
+                ePdfStatus: ingestJson?.ePdfStatus,
+              };
+
+              stepResults.push({
+                nodeId, name: stepName, type: "imaging", status: "success",
+                inputs: { vendorId, vendorName: vendor.name, bucketId, documentTypeId, billNumber, detailLineId, originalFilename, byteSize: pdf.byteSize },
+                outputs: { variableName: responseVariableName, imagingDocumentId: ingestJson?.imagingDocumentId, storagePath: ingestJson?.storagePath },
+                startedAt: stepStart, finishedAt: new Date().toISOString(),
+              });
+
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            } catch (err) {
+              const existingResult = stepResults.find(s => s.nodeId === nodeId);
+              if (!existingResult) {
+                stepResults.push({ nodeId, name: stepName, type: "imaging", status: "error", error: err instanceof Error ? err.message : String(err), startedAt: stepStart, finishedAt: new Date().toISOString() });
+              }
+              throw err;
+            }
+          }
+          try {
+            const vendorId = config.vendorId as string;
+            const lookupBy = (config.lookupBy as string) || "bill_number";
+            const documentTypeId = config.documentTypeId as string;
+            const bucketId = config.bucketId as string;
+            const responseVariableName = (config.responseVariableName as string) || "";
+            if (!vendorId) throw new Error("Imaging step has no vendor configured");
+            if (!documentTypeId) throw new Error("Imaging step has no document type configured");
+            if (!bucketId) throw new Error("Imaging step has no bucket configured");
+            if (!responseVariableName) throw new Error("Imaging step has no output variable name");
+
+            const { data: vendor, error: vendorErr } = await admin
+              .from("imaging_vendors")
+              .select("id, name, vendor_type, supabase_url, anon_key")
+              .eq("id", vendorId)
+              .maybeSingle();
+            if (vendorErr || !vendor) throw new Error(vendorErr?.message || "Imaging vendor not found");
+            if (!vendor.supabase_url || !vendor.anon_key) throw new Error("Imaging vendor is missing supabase_url or anon_key");
+
+            const { data: docType } = await admin
+              .from("imaging_document_types")
+              .select("id, remote_id, name")
+              .eq("id", documentTypeId)
+              .maybeSingle();
+            if (!docType) throw new Error("Imaging document type not found");
+            const remoteDocTypeId = (docType.remote_id as string) || (docType.id as string);
+
+            const lookupMappings = (config.lookupMappings || []) as Array<{
+              field: "bill_number" | "detail_line_id";
+              source: string;
+              sourceValue: string;
+              sourceNodeId?: string;
+            }>;
+
+            const resolveMappingValue = async (source: string, sourceValue: string): Promise<string> => {
+              switch (source) {
+                case "hardcoded":
+                  return sourceValue || "";
+                case "input_variable":
+                  return inputVariables[sourceValue] || "";
+                case "query_column":
+                case "query_field": {
+                  const [varName, colName] = (sourceValue || "").split("::");
+                  const ctxData = context[varName];
+                  if (ctxData) {
+                    const rows = flattenRows(ctxData);
+                    if (rows.length > 0 && colName) {
+                      return String(rows[0][colName] ?? "");
+                    }
+                  }
+                  return "";
+                }
+                case "fixed_value": {
+                  if (!sourceValue) return "";
+                  const { data: fv } = await admin
+                    .from("fixed_values")
+                    .select("value, resolved_value")
+                    .eq("id", sourceValue)
+                    .maybeSingle();
+                  return fv?.resolved_value || fv?.value || "";
+                }
+                case "date_function": {
+                  if (sourceValue && sourceValue.startsWith(DATE_FUNCTION_PREFIX)) {
+                    const fnId = sourceValue.slice(DATE_FUNCTION_PREFIX.length);
+                    const { data: fn } = await admin
+                      .from("date_functions")
+                      .select("base_date, string_format, adjust_years, adjust_months, adjust_days")
+                      .eq("id", fnId)
+                      .maybeSingle();
+                    if (fn) {
+                      return computeDateFunctionValue(
+                        fn.base_date as string,
+                        fn.string_format as string,
+                        fn.adjust_years as number,
+                        fn.adjust_months as number,
+                        fn.adjust_days as number
+                      );
+                    }
+                  }
+                  return sourceValue || "";
+                }
+                default:
+                  return sourceValue || "";
+              }
+            };
+
+            const applyInputVarSubstitution = (val: string): string => {
+              if (Object.keys(inputVariables).length === 0) return val;
+              return val.replace(/\{\{(.+?)\}\}/g, (_m, varName) => {
+                if (varName in inputVariables) return inputVariables[varName];
+                return _m;
+              });
+            };
+
+            const lookupField = lookupBy === "detail_line_id" ? "detail_line_id" : "bill_number";
+            const mapping = lookupMappings.find((m) => m.field === lookupField) || lookupMappings[0];
+            if (!mapping) throw new Error("Imaging step has no lookup value mapping configured");
+            const rawLookup = await resolveMappingValue(mapping.source, mapping.sourceValue);
+            const lookupValue = applyInputVarSubstitution(rawLookup).trim();
+
+            const skipStep = (reason: string) => {
+              context[responseVariableName] = { __type: "pdf_attachment_skipped", reason };
+              stepResults.push({
+                nodeId, name: stepName, type: "imaging", status: "skipped", reason,
+                inputs: { vendorId, lookupBy, lookupValue, documentTypeId, bucketId },
+                outputs: { variableName: responseVariableName },
+                startedAt: stepStart, finishedAt: new Date().toISOString(),
+              });
+            };
+
+            if (!lookupValue) {
+              console.log(`[pulse-runner] Imaging step "${stepName}": empty lookup value, skipping`);
+              skipStep("empty_lookup_value");
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            }
+
+            const proxyBody: Record<string, string> = {
+              action: "list",
+              documentTypeId: remoteDocTypeId,
+              bucketId,
+            };
+            if (lookupBy === "detail_line_id") proxyBody.detailLineId = lookupValue;
+            else proxyBody.billNumber = lookupValue;
+
+            const proxyUrl = `${(vendor.supabase_url as string).replace(/\/$/, "")}/functions/v1/imaging-proxy`;
+            const proxyHeaders = {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${vendor.anon_key}`,
+              "apikey": vendor.anon_key as string,
+            };
+
+            console.log(`[pulse-runner] Imaging step "${stepName}": POST ${proxyUrl} (${lookupBy}=${lookupValue})`);
+            const proxyRes = await fetch(proxyUrl, {
+              method: "POST",
+              headers: proxyHeaders,
+              body: JSON.stringify(proxyBody),
+            });
+
+            if (proxyRes.status === 404) {
+              console.log(`[pulse-runner] Imaging step "${stepName}": 404 not found, skipping`);
+              skipStep("not_found");
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            }
+
+            if (!proxyRes.ok) {
+              const errText = await proxyRes.text();
+              throw new Error(`Imaging proxy failed (${proxyRes.status}): ${errText.slice(0, 300)}`);
+            }
+
+            const proxyJson = await proxyRes.json();
+            const documents = (proxyJson?.documents || []) as Array<Record<string, unknown>>;
+            if (!proxyJson?.success || documents.length === 0) {
+              console.log(`[pulse-runner] Imaging step "${stepName}": no documents returned, skipping`);
+              skipStep("not_found");
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            }
+
+            const doc = documents[0];
+            const documentUrl = doc.documentUrl as string | undefined;
+            if (!documentUrl) {
+              console.log(`[pulse-runner] Imaging step "${stepName}": document has no URL, skipping`);
+              skipStep("no_document_url");
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            }
+
+            const fileRes = await fetch(documentUrl);
+            if (!fileRes.ok) {
+              console.log(`[pulse-runner] Imaging step "${stepName}": download failed ${fileRes.status}, skipping`);
+              skipStep("download_failed");
+              const nextEdges = adjacency.get(nodeId) || [];
+              for (const edge of nextEdges) {
+                await executeNode(edge.target);
+              }
+              return;
+            }
+
+            const pdfBytes = new Uint8Array(await fileRes.arrayBuffer());
+            const today = new Date().toISOString().slice(0, 10);
+            const originalFilename = (doc.originalFilename as string) || `${docType.name || "document"}-${lookupValue}.pdf`;
+            const rawFilename = applyInputVarSubstitution(
+              (config.attachmentFilename as string) || originalFilename
+            )
+              .replace(/\{date\}/g, today)
+              .replace(/\{pulse_name\}/g, pulse.name)
+              .replace(/\{bill_number\}/g, lookupBy === "bill_number" ? lookupValue : "")
+              .replace(/\{detail_line_id\}/g, lookupBy === "detail_line_id" ? lookupValue : "")
+              .replace(/\{document_type\}/g, (docType.name as string) || "");
+            const finalFilename = rawFilename.toLowerCase().endsWith(".pdf") ? rawFilename : `${rawFilename}.pdf`;
+
+            const base64 = uint8ArrayToBase64(pdfBytes);
+            context[responseVariableName] = {
+              __type: "pdf_attachment",
+              filename: finalFilename,
+              contentType: "application/pdf",
+              base64,
+              byteSize: pdfBytes.length,
+            };
+
+            stepResults.push({
+              nodeId, name: stepName, type: "imaging", status: "success",
+              inputs: { vendorId, vendorName: vendor.name, lookupBy, lookupValue, documentTypeId, documentTypeName: docType.name, bucketId },
+              outputs: { variableName: responseVariableName, filename: finalFilename, byteSize: pdfBytes.length, documentId: doc.documentId },
+              startedAt: stepStart, finishedAt: new Date().toISOString(),
+            });
+
+            const nextEdges = adjacency.get(nodeId) || [];
+            for (const edge of nextEdges) {
+              await executeNode(edge.target);
+            }
+          } catch (err) {
+            const existingResult = stepResults.find(s => s.nodeId === nodeId);
+            if (!existingResult) {
+              stepResults.push({ nodeId, name: stepName, type: "imaging", status: "error", error: err instanceof Error ? err.message : String(err), startedAt: stepStart, finishedAt: new Date().toISOString() });
+            }
+            throw err;
+          }
         } else if (node.type === "email" && config) {
           try {
             const toRecipients = (config.toRecipients || []) as string[];
@@ -1120,18 +1954,78 @@ Deno.serve(async (req: Request) => {
                 const finalSubject = substituteInputVars(resolvedSubject);
                 const finalBody = substituteInputVars(resolvedBody);
 
-                // Build attachment if configured
-                let attachment: SendEmailArgs["attachment"] | undefined;
+                // Build attachments: tabular data + upstream PDF reports
+                const attachments: EmailAttachment[] = [];
                 if (config.includeAttachment && rows.length > 0) {
                   const fmt = (config.attachmentFormat as string) || "csv";
                   const filename = (config.attachmentFilename as string) || `${pulse.name}_${today}.${fmt}`;
                   if (fmt === "xlsx") {
                     const bytes = buildXlsxBytes(rows, true);
-                    attachment = { name: filename, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: toBase64(bytes) };
+                    attachments.push({ name: filename, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: toBase64(bytes) });
                   } else {
                     const csvStr = buildCsv(rows, true);
                     const bytes = new TextEncoder().encode(csvStr);
-                    attachment = { name: filename, contentType: "text/csv", base64: toBase64(bytes) };
+                    attachments.push({ name: filename, contentType: "text/csv", base64: toBase64(bytes) });
+                  }
+                }
+
+                const attachedReportNodeIds = (config.attachedReportNodeIds || []) as string[];
+                const attachmentMode = ((config.attachmentMode as string) === "combined") ? "combined" : "separate";
+                const eligiblePayloads: Array<{ name: string; contentType: string; base64: string }> = [];
+                for (const reportNodeId of attachedReportNodeIds) {
+                  const rrConfig = stepConfigs[reportNodeId];
+                  const varName = rrConfig?.responseVariableName as string | undefined;
+                  if (!varName) {
+                    console.warn(`[pulse-runner] Email step references report node ${reportNodeId} with no output variable`);
+                    continue;
+                  }
+                  const pdfPayload = context[varName] as { __type?: string; filename?: string; contentType?: string; base64?: string } | undefined;
+                  if (pdfPayload && pdfPayload.__type === "pdf_attachment_skipped") {
+                    console.log(`[pulse-runner] Email step: skipping attachment "${varName}" because upstream step skipped`);
+                    continue;
+                  }
+                  if (!pdfPayload || pdfPayload.__type !== "pdf_attachment" || !pdfPayload.base64) {
+                    throw new Error(`Attached report "${varName}" was not produced by an upstream Run Report or Imaging step`);
+                  }
+                  eligiblePayloads.push({
+                    name: pdfPayload.filename || `${varName}.pdf`,
+                    contentType: pdfPayload.contentType || "application/pdf",
+                    base64: pdfPayload.base64,
+                  });
+                }
+
+                if (attachmentMode === "combined" && eligiblePayloads.length > 0) {
+                  const substituteVars = (text: string): string => {
+                    if (!text) return text;
+                    return text.replace(/\{\{(.+?)\}\}/g, (_m, varName) => (varName in inputVariables ? inputVariables[varName] : _m));
+                  };
+                  const rawCombined = ((config.combinedAttachmentFilename as string) || `combined_{pulse_name}_{date}.pdf`);
+                  const combinedName = substituteVars(rawCombined)
+                    .replace(/\{date\}/g, today)
+                    .replace(/\{pulse_name\}/g, pulse.name);
+                  const finalCombinedName = combinedName.toLowerCase().endsWith(".pdf") ? combinedName : `${combinedName}.pdf`;
+
+                  if (eligiblePayloads.length === 1) {
+                    attachments.push({ name: finalCombinedName, contentType: eligiblePayloads[0].contentType, base64: eligiblePayloads[0].base64 });
+                  } else {
+                    try {
+                      const merged = await PDFDocument.create();
+                      for (const p of eligiblePayloads) {
+                        const bytes = base64ToUint8Array(p.base64);
+                        const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+                        const pages = await merged.copyPages(src, src.getPageIndices());
+                        for (const page of pages) merged.addPage(page);
+                      }
+                      const mergedBytes = await merged.save();
+                      attachments.push({ name: finalCombinedName, contentType: "application/pdf", base64: uint8ArrayToBase64(mergedBytes) });
+                      console.log(`[pulse-runner] Email step: merged ${eligiblePayloads.length} PDFs into ${finalCombinedName} (${mergedBytes.byteLength} bytes)`);
+                    } catch (mergeErr) {
+                      throw new Error(`Failed to merge PDF attachments: ${mergeErr instanceof Error ? mergeErr.message : String(mergeErr)}`);
+                    }
+                  }
+                } else {
+                  for (const p of eligiblePayloads) {
+                    attachments.push(p);
                   }
                 }
 
@@ -1145,7 +2039,7 @@ Deno.serve(async (req: Request) => {
                   subject: finalSubject,
                   body: useHtml && bodyType !== "html" ? finalBody.replace(/\n/g, "<br>") : finalBody,
                   isHtml: useHtml,
-                  attachment,
+                  attachments: attachments.length > 0 ? attachments : undefined,
                 };
 
                 if (provider.provider === "gmail") {
@@ -1216,6 +2110,10 @@ Deno.serve(async (req: Request) => {
           status: "error",
           finished_at: new Date().toISOString(),
           error_message: message,
+          result_summary: {
+            workflow_version: 2,
+            step_results: stepResultsShared,
+          },
         })
         .eq("id", executionId);
     }
