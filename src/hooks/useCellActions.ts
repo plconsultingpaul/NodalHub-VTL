@@ -45,6 +45,7 @@ export function useCellActions() {
       show_on_mobile?: boolean;
       requires_confirmation?: boolean;
       confirmation_message?: string | null;
+      is_hidden?: boolean;
     }>
   ): Promise<{ error: string | null }> => {
     setLoading(true);
@@ -88,6 +89,7 @@ export function useCellActions() {
           show_on_mobile: action.show_on_mobile ?? true,
           requires_confirmation: action.requires_confirmation ?? false,
           confirmation_message: action.confirmation_message ?? null,
+          is_hidden: action.is_hidden ?? false,
         };
 
         if (action.id) {
