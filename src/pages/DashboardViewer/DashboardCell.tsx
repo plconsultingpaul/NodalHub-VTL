@@ -8,7 +8,7 @@ import DatePicker from '../../components/ui/DatePicker';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLookupResolver } from '../../hooks/useLookupResolver';
 import { useFixedValues } from '../../hooks/useFixedValues';
-import { executeActionForRows, executeRunReportForRow, getPromptMappings, getFixedValueListMappings, executeLinkAction, actionRequiresRowData } from './actionExecutor';
+import { executeActionForRows, executeRunReportForRow, executePostActionOnlyForRows, getPromptMappings, getFixedValueListMappings, executeLinkAction, actionRequiresRowData } from './actionExecutor';
 import type { ActionProgressCallback } from './actionExecutor';
 import ReportViewerModal from './ReportViewerModal';
 import type {
@@ -1865,7 +1865,9 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       });
     }
 
-    const result = await executeActionForRows(action, rows, onProgress, undefined, fixedValues, profile, parameterValuesRef.current);
+    const result = action.action_type === 'post_action_only'
+      ? await executePostActionOnlyForRows(action, rows, onProgress, undefined, parameterValuesRef.current)
+      : await executeActionForRows(action, rows, onProgress, undefined, fixedValues, profile, parameterValuesRef.current);
 
     if (action.refresh_after_execute) {
       fetchData();
@@ -1877,7 +1879,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
   useImperativeHandle(ref, () => ({
     getColumnConfig,
     executeActionOnSelectedRows,
-    getButtonActions: () => cellActionsRef.current.filter(a => a.display_mode === 'button' || a.display_mode === 'both'),
+    getButtonActions: () => cellActionsRef.current.filter(a => !a.is_hidden && (a.display_mode === 'button' || a.display_mode === 'both')),
     getSelectedRowData: () => {
       if (!tabulatorRef.current) return null;
       const selectedRows = tabulatorRef.current.getSelectedRows();
@@ -2411,7 +2413,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
     ];
 
-    const contextMenuActions = cellActionsRef.current.filter(a => a.display_mode === 'context_menu' || a.display_mode === 'both');
+    const contextMenuActions = cellActionsRef.current.filter(a => !a.is_hidden && (a.display_mode === 'context_menu' || a.display_mode === 'both'));
     if (contextMenuActions.length > 0) {
       const executeActionFromMenu = async (action: DashboardCellActionWithQuery, cellComp: Tabulator.CellComponent) => {
         if (action.requires_confirmation && action.action_type !== 'popup') {
@@ -2491,6 +2493,42 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           return;
         }
 
+        if (action.action_type === 'post_action_only') {
+          const clickedRow = cellComp.getRow().getData() as Record<string, unknown>;
+          let paoRows: Record<string, unknown>[] = [];
+          if (cell.enable_row_selection && tabulatorRef.current) {
+            const selectedRows = tabulatorRef.current.getSelectedRows();
+            if (selectedRows.length > 1) {
+              paoRows = selectedRows.map((r: { getData: () => Record<string, unknown> }) => r.getData());
+            }
+          }
+          if (paoRows.length === 0) paoRows = [clickedRow];
+
+          const promptsPao = getPromptMappings(action);
+          const fvListPao = getFixedValueListMappings(action, fixedValues);
+          const allPaoPrompts = [...promptsPao, ...fvListPao];
+          if (allPaoPrompts.length > 0) {
+            setPromptDialog({
+              action,
+              mappings: allPaoPrompts,
+              values: Object.fromEntries(allPaoPrompts.map(p => [p.parameterName, ''])),
+              rows: paoRows,
+            });
+            promptResolveRef.current = (result) => {
+              onActionCompleteRef.current?.(action.display_name, result);
+            };
+            return;
+          }
+
+          setCellProcessing({ name: action.display_name, current: 0, total: paoRows.length });
+          const paoResult = await executePostActionOnlyForRows(action, paoRows, (current, total) => {
+            setCellProcessing({ name: action.display_name, current, total });
+          }, undefined, parameterValuesRef.current);
+          setCellProcessing(null);
+          onActionCompleteRef.current?.(action.display_name, paoResult);
+          return;
+        }
+
         const clickedRow = cellComp.getRow().getData() as Record<string, unknown>;
         let rows: Record<string, unknown>[] = [];
 
@@ -2545,6 +2583,7 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
         const popupActions = visibleActions.filter(a => a.action_type === 'popup');
         const linkActions = visibleActions.filter(a => a.action_type === 'link');
         const reportActions = visibleActions.filter(a => a.action_type === 'run_report');
+        const postActionOnlyActions = visibleActions.filter(a => a.action_type === 'post_action_only');
 
       if (executeActions.length > 0) {
         if (executeActions.length === 1) {
@@ -2633,6 +2672,29 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
           }));
           cellContextMenu.push({
             label: '<span style="font-weight:500;color:#be123c;">&#128209; Run Report</span>',
+            menu: subMenu
+          } as unknown as Tabulator.MenuObject<Tabulator.CellComponent>);
+        }
+      }
+
+      if (postActionOnlyActions.length > 0) {
+        if (postActionOnlyActions.length === 1) {
+          const action = postActionOnlyActions[0];
+          cellContextMenu.push({
+            label: `<span style="font-weight:500;color:#4f46e5;">&#9889; ${action.display_name}</span>`,
+            action: (_e, cellComponent) => {
+              executeActionFromMenu(action, cellComponent);
+            }
+          } as Tabulator.MenuObject<Tabulator.CellComponent>);
+        } else {
+          const subMenu = postActionOnlyActions.map(action => ({
+            label: `<span style="color:#4f46e5;">&#9889; ${action.display_name}</span>`,
+            action: (_e: Event, cellComponent: Tabulator.CellComponent) => {
+              executeActionFromMenu(action, cellComponent);
+            }
+          }));
+          cellContextMenu.push({
+            label: '<span style="font-weight:500;color:#4f46e5;">&#9889; Run Pulse</span>',
             menu: subMenu
           } as unknown as Tabulator.MenuObject<Tabulator.CellComponent>);
         }
@@ -2992,6 +3054,19 @@ const DashboardCell = forwardRef<DashboardCellRef, DashboardCellProps>(function 
       }
       if (promptResolveRef.current) {
         promptResolveRef.current(dispatchResult);
+        promptResolveRef.current = null;
+      }
+      return;
+    }
+
+    if (action.action_type === 'post_action_only') {
+      setCellProcessing({ name: action.display_name, current: 0, total: rows.length });
+      const paoResult = await executePostActionOnlyForRows(action, rows, (current, total) => {
+        setCellProcessing({ name: action.display_name, current, total });
+      }, values, parameterValuesRef.current);
+      setCellProcessing(null);
+      if (promptResolveRef.current) {
+        promptResolveRef.current(paoResult);
         promptResolveRef.current = null;
       }
       return;
