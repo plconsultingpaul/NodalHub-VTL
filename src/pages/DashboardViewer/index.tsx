@@ -229,7 +229,7 @@ export default function DashboardViewer() {
       const actionMap: Record<string, DashboardCellActionWithQuery[]> = {};
       for (const c of cells) {
         const actions = await fetchActionsForCell(c.id);
-        const buttons = actions.filter(a => a.display_mode === 'button' || a.display_mode === 'both');
+        const buttons = actions.filter(a => !a.is_hidden && (a.display_mode === 'button' || a.display_mode === 'both'));
         if (buttons.length > 0) {
           actionMap[c.id] = buttons;
         }
