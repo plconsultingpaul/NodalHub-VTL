@@ -1,5 +1,5 @@
 import { type DragEvent } from 'react';
-import { Clock, Database, GitBranch, Mail, Zap } from 'lucide-react';
+import { Clock, Database, GitBranch, Mail, Zap, FileText, ScanLine } from 'lucide-react';
 
 const nodeTypes = [
   {
@@ -27,6 +27,22 @@ const nodeTypes = [
     disabled: false,
   },
   {
+    type: 'run_report',
+    label: 'Run Report',
+    description: 'Fetch a PDF report',
+    icon: FileText,
+    color: 'rose',
+    disabled: false,
+  },
+  {
+    type: 'imaging',
+    label: 'Imaging',
+    description: 'Fetch a document from a vendor',
+    icon: ScanLine,
+    color: 'cyan',
+    disabled: false,
+  },
+  {
     type: 'condition',
     label: 'Condition',
     description: 'Branch on logic',
@@ -48,8 +64,10 @@ const colorMap: Record<string, { bg: string; text: string; border: string }> = {
   blue: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
   green: { bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-600 dark:text-green-400', border: 'border-green-200 dark:border-green-800' },
   orange: { bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-200 dark:border-orange-800' },
+  rose: { bg: 'bg-rose-50 dark:bg-rose-900/20', text: 'text-rose-600 dark:text-rose-400', border: 'border-rose-200 dark:border-rose-800' },
   amber: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
   violet: { bg: 'bg-violet-50 dark:bg-violet-900/20', text: 'text-violet-600 dark:text-violet-400', border: 'border-violet-200 dark:border-violet-800' },
+  cyan: { bg: 'bg-cyan-50 dark:bg-cyan-900/20', text: 'text-cyan-600 dark:text-cyan-400', border: 'border-cyan-200 dark:border-cyan-800' },
 };
 
 export default function NodePalette() {
