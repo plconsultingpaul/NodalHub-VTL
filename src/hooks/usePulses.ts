@@ -68,7 +68,7 @@ export function usePulses() {
   const updatePulse = async (id: string, updates: PulseUpdate) => {
     const { error: updateError } = await supabase
       .from('pulses')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...updates, updated_at: new Date().toISOString(), updated_by: user?.id || null })
       .eq('id', id);
 
     if (updateError) return { error: updateError.message };
