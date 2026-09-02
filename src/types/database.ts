@@ -1247,6 +1247,11 @@ export interface ImagingDocumentType {
   updated_at: string;
 }
 
+export interface PulseEndStepConfig {
+  stepType: 'end';
+  name?: string;
+}
+
 export type PulseStepConfig =
   | PulseTriggerStepConfig
   | PulseQueryStepConfig
@@ -1254,7 +1259,8 @@ export type PulseStepConfig =
   | PulseEmailStepConfig
   | PulseActionStepConfig
   | PulseRunReportStepConfig
-  | PulseImagingStepConfig;
+  | PulseImagingStepConfig
+  | PulseEndStepConfig;
 
 export type ProjectWithDashboards = Project & {
   dashboards: Dashboard[];
