@@ -87,10 +87,29 @@ function ApiEndpointNode({ id, data, selected }: NodeProps<ApiEndpointNodeData>)
       {!data.configured && (
         <div className="mt-1.5 text-[10px] text-red-500 font-medium">No query selected</div>
       )}
+      <div className="flex justify-between mt-2 px-1">
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Data</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">No Data</span>
+          <div className="w-2 h-2 rounded-full bg-gray-400" />
+        </div>
+      </div>
       <Handle
         type="source"
         position={Position.Bottom}
+        id="data"
+        style={{ left: '30%' }}
         className="!w-3 !h-3 !bg-green-500 !border-2 !border-white dark:!border-gray-800"
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="no-data"
+        style={{ left: '70%' }}
+        className="!w-3 !h-3 !bg-gray-400 !border-2 !border-white dark:!border-gray-800"
       />
     </div>
   );
