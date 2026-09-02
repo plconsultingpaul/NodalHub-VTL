@@ -2,6 +2,7 @@ import { useMemo, useEffect, useRef, useState } from 'react';
 import { ScanLine, Braces, Plus, Trash2, Download, Upload } from 'lucide-react';
 import CustomDropdown from '../../../components/ui/CustomDropdown';
 import { useImagingVendors } from '../../../hooks/useImagingVendors';
+import { useQueries } from '../../../hooks/useQueries';
 import type {
   PulseImagingStepConfig,
   PulseInputVariable,
@@ -57,6 +58,7 @@ export default function ImagingConfigPanel({
   upstreamReportNodes = [],
 }: ImagingConfigPanelProps) {
   const { vendors, documentTypes, loading } = useImagingVendors();
+  const { queries } = useQueries();
 
   const current: PulseImagingStepConfig = useMemo(
     () =>
@@ -92,13 +94,17 @@ export default function ImagingConfigPanel({
   const upstreamColumnOptions = useMemo(() => {
     const opts: { value: string; label: string; nodeId: string }[] = [];
     for (const n of upstreamQueryNodes) {
-      const cols = n.lastKnownColumns || [];
+      const queryRecord = n.queryId ? queries.find((q) => q.id === n.queryId) : undefined;
+      const raw = (queryRecord?.last_known_columns as unknown[] | undefined) || n.lastKnownColumns || [];
+      const cols = Array.isArray(raw)
+        ? raw.map((c) => (typeof c === 'string' ? c : (c as { name?: string })?.name)).filter((c): c is string => !!c)
+        : [];
       for (const c of cols) {
         opts.push({ value: `${n.id}::${c}`, label: `${n.label} · ${c}`, nodeId: n.id });
       }
     }
     return opts;
-  }, [upstreamQueryNodes]);
+  }, [upstreamQueryNodes, queries]);
 
   // ============ RECEIVE MODE ============
 
@@ -552,39 +558,69 @@ export default function ImagingConfigPanel({
               <button
                 type="button"
                 onClick={() => {
-                  if (inputVariables.length === 0) return;
+                  if (inputVariables.length === 0 && upstreamColumnOptions.length === 0) return;
                   setShowFilenameVars((v) => !v);
                 }}
-                disabled={inputVariables.length === 0}
-                title={inputVariables.length === 0 ? 'No input variables defined for this Pulse' : 'Insert an input variable'}
+                disabled={inputVariables.length === 0 && upstreamColumnOptions.length === 0}
+                title={
+                  inputVariables.length === 0 && upstreamColumnOptions.length === 0
+                    ? 'No input variables or upstream query columns available'
+                    : 'Insert an input variable or query column'
+                }
                 className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1.5 text-xs font-mono rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {'{ }'}
               </button>
-              {showFilenameVars && inputVariables.length > 0 && (
+              {showFilenameVars && (inputVariables.length > 0 || upstreamColumnOptions.length > 0) && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setShowFilenameVars(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-40 w-56 max-h-64 overflow-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1">
-                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
-                      Insert Input Variable
-                    </div>
-                    {inputVariables.map((v) => (
-                      <button
-                        key={v.name}
-                        type="button"
-                        onClick={() => insertFilenameToken(`{{${v.name}}}`)}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-cyan-50 dark:hover:bg-cyan-900/20 flex items-center justify-between gap-2"
-                      >
-                        <span className="font-mono text-cyan-700 dark:text-cyan-300 truncate">{`{{${v.name}}}`}</span>
-                        <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">{v.dataType}</span>
-                      </button>
-                    ))}
+                  <div className="absolute right-0 top-full mt-1 z-40 w-64 max-h-72 overflow-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg py-1">
+                    {inputVariables.length > 0 && (
+                      <>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                          Insert Input Variable
+                        </div>
+                        {inputVariables.map((v) => (
+                          <button
+                            key={`iv-${v.name}`}
+                            type="button"
+                            onClick={() => insertFilenameToken(`{{${v.name}}}`)}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-cyan-50 dark:hover:bg-cyan-900/20 flex items-center justify-between gap-2"
+                          >
+                            <span className="font-mono text-cyan-700 dark:text-cyan-300 truncate">{`{{${v.name}}}`}</span>
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">{v.dataType}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    {upstreamColumnOptions.length > 0 && (
+                      <>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-t border-gray-100 dark:border-gray-700">
+                          Insert Query Column
+                        </div>
+                        {upstreamColumnOptions.map((o) => {
+                          const col = o.value.split('::')[1] || o.value;
+                          return (
+                            <button
+                              key={`qc-${o.value}`}
+                              type="button"
+                              onClick={() => insertFilenameToken(`{{${col}}}`)}
+                              className="w-full text-left px-3 py-1.5 text-xs hover:bg-cyan-50 dark:hover:bg-cyan-900/20 flex items-center justify-between gap-2"
+                              title={o.label}
+                            >
+                              <span className="font-mono text-cyan-700 dark:text-cyan-300 truncate">{`{{${col}}}`}</span>
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0 truncate max-w-[40%]">{o.label.split(' · ')[0]}</span>
+                            </button>
+                          );
+                        })}
+                      </>
+                    )}
                   </div>
                 </>
               )}
             </div>
             <p className="text-[11px] text-gray-400 mt-1">
-              Supports {`{{variable}}`} tokens, {'{date}'}, and {'{pulse_name}'}. Defaults to the Run Report filename when blank.
+              Supports {`{{variable}}`} input tokens, {`{{COLUMN}}`} query column tokens, {'{date}'}, and {'{pulse_name}'}. Defaults to the Run Report filename when blank.
             </p>
           </div>
 
