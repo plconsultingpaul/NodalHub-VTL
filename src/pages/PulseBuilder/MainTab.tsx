@@ -12,6 +12,9 @@ interface MainTabProps {
   updatedAt?: string;
   lastRunAt?: string | null;
   lastRunStatus?: string | null;
+  createdByName?: string | null;
+  updatedByName?: string | null;
+  nextRunAt?: string | null;
 }
 
 const formatDate = (iso?: string | null) => {
@@ -27,6 +30,9 @@ export default function MainTab({
   updatedAt,
   lastRunAt,
   lastRunStatus,
+  createdByName,
+  updatedByName,
+  nextRunAt,
 }: MainTabProps) {
   const triggerType = draft.trigger_type || 'scheduled';
   const inputVariables = (draft.input_variables || []) as PulseInputVariable[];
@@ -332,6 +338,18 @@ export default function MainTab({
                 </span>
               )}
             </p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created By</p>
+            <p className="text-sm text-gray-900 dark:text-white mt-1">{createdByName || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Updated By</p>
+            <p className="text-sm text-gray-900 dark:text-white mt-1">{updatedByName || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">Next Run</p>
+            <p className="text-sm text-gray-900 dark:text-white mt-1">{nextRunAt ? formatDate(nextRunAt) : '—'}</p>
           </div>
         </div>
       )}
