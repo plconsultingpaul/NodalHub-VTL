@@ -174,6 +174,37 @@ export default function WorkflowCanvas({
     }
   }, [setNodes, selectedNode]);
 
+  useEffect(() => {
+    if (triggerType === 'action') return;
+    const enabled = (schedules || []).filter((s) => s.enabled);
+    const triggerNode = nodes.find((n) => n.type === 'trigger');
+    if (!triggerNode) return;
+    const isConfigured = enabled.length > 0;
+    const first = enabled[0];
+    const scheduleSummary = first
+      ? (first.label || briefCronDescription(first.cron_expression)) +
+        (enabled.length > 1 ? ` (+${enabled.length - 1} more)` : '')
+      : undefined;
+    const label = isConfigured ? 'Schedule (Active)' : 'Schedule';
+    const nextData = {
+      configured: isConfigured,
+      label,
+      scheduleSummary,
+      active: isConfigured,
+      triggerType: 'scheduled' as const,
+    };
+    const cur = triggerNode.data as Record<string, unknown>;
+    if (
+      cur.configured === nextData.configured &&
+      cur.label === nextData.label &&
+      cur.scheduleSummary === nextData.scheduleSummary &&
+      cur.active === nextData.active
+    ) {
+      return;
+    }
+    updateNodeData(triggerNode.id, nextData);
+  }, [schedules, triggerType, nodes, updateNodeData]);
+
   const handleStepConfigChange = useCallback((nodeId: string, config: PulseStepConfig) => {
     setStepConfigs((prev) => ({ ...prev, [nodeId]: config }));
 
