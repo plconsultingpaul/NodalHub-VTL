@@ -1,5 +1,5 @@
 import { type DragEvent } from 'react';
-import { Clock, Database, GitBranch, Mail, Zap, FileText, ScanLine } from 'lucide-react';
+import { Clock, Database, GitBranch, Mail, Zap, FileText, ScanLine, StopCircle } from 'lucide-react';
 
 const nodeTypes = [
   {
@@ -58,6 +58,14 @@ const nodeTypes = [
     color: 'violet',
     disabled: false,
   },
+  {
+    type: 'end',
+    label: 'End',
+    description: 'Terminate the workflow',
+    icon: StopCircle,
+    color: 'red',
+    disabled: false,
+  },
 ] as const;
 
 const colorMap: Record<string, { bg: string; text: string; border: string }> = {
@@ -68,6 +76,7 @@ const colorMap: Record<string, { bg: string; text: string; border: string }> = {
   amber: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
   violet: { bg: 'bg-violet-50 dark:bg-violet-900/20', text: 'text-violet-600 dark:text-violet-400', border: 'border-violet-200 dark:border-violet-800' },
   cyan: { bg: 'bg-cyan-50 dark:bg-cyan-900/20', text: 'text-cyan-600 dark:text-cyan-400', border: 'border-cyan-200 dark:border-cyan-800' },
+  red: { bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800' },
 };
 
 export default function NodePalette() {
