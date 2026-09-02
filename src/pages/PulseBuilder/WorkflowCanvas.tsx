@@ -23,6 +23,7 @@ import EmailNode from './nodes/EmailNode';
 import ActionNode from './nodes/ActionNode';
 import RunReportNode from './nodes/RunReportNode';
 import ImagingNode from './nodes/ImagingNode';
+import EndNode from './nodes/EndNode';
 import TriggerConfigPanel from './panels/TriggerConfigPanel';
 import ApiEndpointConfigPanel from './panels/ApiEndpointConfigPanel';
 import EmailConfigPanel from './panels/EmailConfigPanel';
@@ -40,6 +41,7 @@ const nodeTypes = {
   action: ActionNode,
   run_report: RunReportNode,
   imaging: ImagingNode,
+  end: EndNode,
 };
 
 const defaultTriggerNode: Node = {
@@ -330,6 +332,14 @@ export default function WorkflowCanvas({
         edgeStyle.style = { stroke: '#ef4444' };
         edgeStyle.label = 'No';
         edgeStyle.labelStyle = { fill: '#ef4444', fontWeight: 600, fontSize: 11 };
+      } else if (params.sourceHandle === 'data') {
+        edgeStyle.style = { stroke: '#22c55e' };
+        edgeStyle.label = 'Data';
+        edgeStyle.labelStyle = { fill: '#22c55e', fontWeight: 600, fontSize: 11 };
+      } else if (params.sourceHandle === 'no-data') {
+        edgeStyle.style = { stroke: '#9ca3af' };
+        edgeStyle.label = 'No Data';
+        edgeStyle.labelStyle = { fill: '#6b7280', fontWeight: 600, fontSize: 11 };
       }
       setEdges((eds) =>
         addEdge(
@@ -399,13 +409,14 @@ export default function WorkflowCanvas({
         imaging: 'Imaging',
         condition: 'Condition',
         email: 'Email',
+        end: 'End Workflow',
       };
 
       const newNode: Node = {
         id: getNodeId(nodes),
         type,
         position,
-        data: { label: labelMap[type] || type, configured: false },
+        data: { label: labelMap[type] || type, configured: type === 'end' ? true : false },
       };
 
       setNodes((nds) => [...nds, newNode]);
@@ -423,6 +434,7 @@ export default function WorkflowCanvas({
   );
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === 'end') return;
     setSelectedNode(node);
   }, []);
 
