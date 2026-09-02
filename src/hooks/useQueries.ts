@@ -109,7 +109,7 @@ export function useQueries() {
 
     if (error) return { error: error.message };
     await fetchQueries();
-    return { data, error: null };
+    return { error: null };
   };
 
   const deleteQuery = async (id: string) => {
