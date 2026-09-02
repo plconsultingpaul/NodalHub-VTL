@@ -5,56 +5,6 @@ import { useFixedValues } from '../../../hooks/useFixedValues';
 import { useLookupResolver } from '../../../hooks/useLookupResolver';
 import { useDateFunctions } from '../../../hooks/useDateFunctions';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { supabase } from '../../../lib/supabase';
-
-function normalizeColumnNames(raw: unknown): string[] {
-  if (!raw) return [];
-  let arr: unknown[] = [];
-  if (Array.isArray(raw)) {
-    arr = raw;
-  } else if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) arr = parsed;
-    } catch {
-      return [];
-    }
-  } else {
-    return [];
-  }
-  const out: string[] = [];
-  arr.forEach((c) => {
-    if (typeof c === 'string') {
-      if (c.startsWith('[') || c.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(c);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((p) => {
-              if (typeof p === 'string') out.push(p);
-              else if (p && typeof p === 'object' && 'name' in p) out.push((p as { name: string }).name);
-            });
-          } else if (parsed && typeof parsed === 'object' && 'name' in parsed) {
-            out.push((parsed as { name: string }).name);
-          }
-        } catch { /* skip */ }
-        return;
-      }
-      if (c.startsWith('"')) {
-        try {
-          const s = JSON.parse(c);
-          if (typeof s === 'string') out.push(s);
-        } catch { /* skip */ }
-        return;
-      }
-      out.push(c);
-      return;
-    }
-    if (c && typeof c === 'object' && 'name' in c) {
-      out.push((c as { name: string }).name);
-    }
-  });
-  return Array.from(new Set(out.filter(Boolean)));
-}
 import { isDateFunctionRef, getDateFunctionId, makeDateFunctionRef, computeDateFunction } from '../../../lib/dateFunctions';
 import CustomDropdown from '../../../components/ui/CustomDropdown';
 import DatePicker from '../../../components/ui/DatePicker';
@@ -157,42 +107,33 @@ function QueryFieldPicker({
   onChange,
   upstreamColumnOptions,
   isDark,
-  isLoading,
 }: {
   value: string;
   onChange: (v: string) => void;
   upstreamColumnOptions: { value: string; label: string }[];
   isDark: boolean;
-  isLoading?: boolean;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const selectedLabel = upstreamColumnOptions.find(o => o.value === value)?.label;
 
   if (upstreamColumnOptions.length === 0) {
     return (
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="e.g. variableName::columnName"
-            className="flex-1 px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
-          />
-          <button
-            type="button"
-            disabled
-            className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-500 cursor-not-allowed"
-            title="No columns detected on the upstream query. Open it in Query Manager and save its Result Columns, or run a test."
-          >
-            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Braces className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-        <p className="text-[10px] text-gray-400 dark:text-gray-500">
-          {isLoading
-            ? 'Loading fields from Query Manager...'
-            : 'No fields found. Open the upstream query in Query Manager and detect / save its Result Columns.'}
-        </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. variableName::columnName"
+          className="flex-1 px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+        <button
+          type="button"
+          disabled
+          className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-500 cursor-not-allowed"
+          title="Test the upstream query in Query Manager to load available fields"
+        >
+          <Braces className="w-3.5 h-3.5" />
+        </button>
       </div>
     );
   }
@@ -314,51 +255,21 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
     .filter(q => q.purpose_type === 'action' && (q.app_target === 'pulse' || q.app_target === 'both'))
     .map(q => ({ value: q.id, label: q.name }));
 
-  const [fetchedColumnsByQueryId, setFetchedColumnsByQueryId] = useState<Record<string, string[]>>({});
-  const [columnsLoading, setColumnsLoading] = useState(false);
-
-  useEffect(() => {
-    const missing = (upstreamQueryNodes || [])
-      .filter(n => !!n.queryId)
-      .filter(n => {
-        if (fetchedColumnsByQueryId[n.queryId!] !== undefined) return false;
-        const rec = queries.find(q => q.id === n.queryId);
-        const fromRecord = normalizeColumnNames(rec?.last_known_columns);
-        const fromNode = normalizeColumnNames(n.lastKnownColumns);
-        return fromRecord.length === 0 && fromNode.length === 0;
-      });
-
-    if (missing.length === 0) return;
-
-    let cancelled = false;
-    setColumnsLoading(true);
-    (async () => {
-      const ids = Array.from(new Set(missing.map(m => m.queryId!)));
-      const { data } = await supabase
-        .from('queries')
-        .select('id, last_known_columns')
-        .in('id', ids);
-      if (cancelled) return;
-      const next: Record<string, string[]> = {};
-      ids.forEach(id => {
-        const row = (data || []).find(r => r.id === id);
-        next[id] = normalizeColumnNames(row?.last_known_columns);
-      });
-      setFetchedColumnsByQueryId(prev => ({ ...prev, ...next }));
-      setColumnsLoading(false);
-    })().catch(() => { if (!cancelled) setColumnsLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [upstreamQueryNodes, queries, fetchedColumnsByQueryId]);
-
   const upstreamColumnOptions = useMemo(() => {
     const options: { value: string; label: string }[] = [];
     (upstreamQueryNodes || []).forEach(node => {
       const queryRecord = queries.find(q => q.id === node.queryId);
-      const fromRecord = normalizeColumnNames(queryRecord?.last_known_columns);
-      const fromNode = normalizeColumnNames(node.lastKnownColumns);
-      const fromFetched = node.queryId ? (fetchedColumnsByQueryId[node.queryId] || []) : [];
-      const columns = Array.from(new Set([...fromNode, ...fromRecord, ...fromFetched]));
+      const raw = (queryRecord?.last_known_columns as unknown[]) || node.lastKnownColumns || [];
+      const columns: string[] = raw
+        .map((c: unknown) => {
+          if (typeof c === 'string') {
+            if (c.startsWith('[') || c.startsWith('{') || c.startsWith('"')) return null;
+            return c;
+          }
+          if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name;
+          return null;
+        })
+        .filter((c): c is string => !!c);
       if (columns.length > 0) {
         const varName = node.responseVariableName || node.id;
         columns.forEach(col => {
@@ -370,7 +281,7 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
       }
     });
     return options;
-  }, [upstreamQueryNodes, queries, fetchedColumnsByQueryId]);
+  }, [upstreamQueryNodes, queries]);
 
   const inputVarOptions = useMemo(() => {
     return (inputVariables || []).map(v => ({
@@ -400,7 +311,6 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
             onChange={(val) => handleMappingChange(mapping.paramName, { sourceValue: val })}
             upstreamColumnOptions={upstreamColumnOptions}
             isDark={isDark}
-            isLoading={columnsLoading}
           />
         );
 
@@ -411,7 +321,6 @@ export default function ActionConfigPanel({ config, onChange, inputVariables, up
             onChange={(val) => handleMappingChange(mapping.paramName, { sourceValue: val })}
             upstreamColumnOptions={upstreamColumnOptions}
             isDark={isDark}
-            isLoading={columnsLoading}
           />
         );
 
