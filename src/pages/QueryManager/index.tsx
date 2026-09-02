@@ -357,6 +357,8 @@ export default function QueryManager() {
     setSaving(true);
     setSaveError('');
 
+    console.log('[QueryManager.handleSave] Saving query:', { editing: !!editingQuery, data });
+
     let result: { error?: string | null; data?: Query } | undefined;
 
     if (editingQuery) {
@@ -364,6 +366,8 @@ export default function QueryManager() {
     } else {
       result = await createQuery(data as Omit<Query, 'id' | 'created_at' | 'updated_at' | 'company_id' | 'created_by'>);
     }
+
+    console.log('[QueryManager.handleSave] Save result:', result);
 
     setSaving(false);
 
