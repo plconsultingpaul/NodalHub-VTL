@@ -1411,7 +1411,16 @@ Deno.serve(async (req: Request) => {
 
               const pdf = sourcePayload as { base64: string; filename?: string; byteSize?: number };
 
-              const resolveMappingValue = async (source: string, sourceValue: string): Promise<string> => {
+              const getRowFieldCaseInsensitive = (row: Record<string, unknown>, colName: string): unknown => {
+                if (row[colName] !== undefined) return row[colName];
+                const target = colName.toLowerCase();
+                for (const k of Object.keys(row)) {
+                  if (k.toLowerCase() === target) return row[k];
+                }
+                return undefined;
+              };
+
+              const resolveMappingValue = async (source: string, sourceValue: string, sourceNodeId?: string): Promise<string> => {
                 switch (source) {
                   case "hardcoded":
                     return sourceValue || "";
@@ -1419,15 +1428,40 @@ Deno.serve(async (req: Request) => {
                     return inputVariables[sourceValue] || "";
                   case "query_column":
                   case "query_field": {
-                    const [varName, colName] = (sourceValue || "").split("::");
-                    const ctxData = context[varName];
-                    if (ctxData) {
-                      const rows = flattenRows(ctxData);
-                      if (rows.length > 0 && colName) {
-                        return String(rows[0][colName] ?? "");
-                      }
+                    let varName: string;
+                    let colName: string;
+                    if (sourceValue && sourceValue.includes("::")) {
+                      const parts = sourceValue.split("::");
+                      varName = parts[0];
+                      colName = parts.slice(1).join("::");
+                    } else {
+                      const upstreamCfg = sourceNodeId ? stepConfigs[sourceNodeId] : undefined;
+                      varName = (upstreamCfg?.responseVariableName as string) || sourceNodeId || "";
+                      colName = sourceValue || "";
                     }
-                    return "";
+                    const ctxData = context[varName];
+                    const ctxKeys = Object.keys(context);
+                    if (!ctxData) {
+                      console.log(
+                        `[pulse-runner] Imaging (send) query_column lookup MISS: sourceValue="${sourceValue}", varName="${varName}", colName="${colName}", available context keys=${JSON.stringify(ctxKeys)}`
+                      );
+                      return "";
+                    }
+                    const rows = flattenRows(ctxData);
+                    if (rows.length === 0 || !colName) {
+                      console.log(
+                        `[pulse-runner] Imaging (send) query_column empty rows: sourceValue="${sourceValue}", varName="${varName}", colName="${colName}", rowCount=${rows.length}`
+                      );
+                      return "";
+                    }
+                    const val = getRowFieldCaseInsensitive(rows[0], colName);
+                    if (val === undefined) {
+                      console.log(
+                        `[pulse-runner] Imaging (send) query_column column not found (case-insensitive): sourceValue="${sourceValue}", colName="${colName}", row keys=${JSON.stringify(Object.keys(rows[0]))}`
+                      );
+                      return "";
+                    }
+                    return String(val ?? "");
                   }
                   case "fixed_value": {
                     if (!sourceValue) return "";
@@ -1475,28 +1509,58 @@ Deno.serve(async (req: Request) => {
               const billMap = sendCfg.billNumberMapping as SendValueMapping | undefined;
               const detailMap = sendCfg.detailLineIdMapping as SendValueMapping | undefined;
 
-              const rawBill = billMap ? await resolveMappingValue(billMap.source, billMap.sourceValue) : "";
+              console.log(
+                `[pulse-runner] Imaging (send) "${stepName}" billNumberMapping=${JSON.stringify(billMap)}, inputVariable keys=${JSON.stringify(Object.keys(inputVariables))}`
+              );
+              const rawBill = billMap ? await resolveMappingValue(billMap.source, billMap.sourceValue, billMap.sourceNodeId) : "";
               const billNumber = applyInputVarSubstitution(rawBill).trim();
-              if (!billNumber) throw new Error("Imaging (send) step could not resolve a Bill Number");
+              console.log(
+                `[pulse-runner] Imaging (send) "${stepName}" bill resolution: source="${billMap?.source}", sourceValue="${billMap?.sourceValue}", rawBill="${rawBill}", afterInputVarSub="${billNumber}"`
+              );
+              if (!billNumber) {
+                throw new Error(
+                  `Imaging (send) step could not resolve a Bill Number (source="${billMap?.source ?? "none"}", sourceValue="${billMap?.sourceValue ?? ""}")`
+                );
+              }
 
-              const rawDetail = detailMap ? await resolveMappingValue(detailMap.source, detailMap.sourceValue) : "";
+              const rawDetail = detailMap ? await resolveMappingValue(detailMap.source, detailMap.sourceValue, detailMap.sourceNodeId) : "";
               const detailLineId = applyInputVarSubstitution(rawDetail).trim();
 
               const today = new Date().toISOString().slice(0, 10);
               const filenameTemplate = (sendCfg.originalFilename as string) || pdf.filename || `document-${billNumber}.pdf`;
-              const filenameSubbed = applyInputVarSubstitution(filenameTemplate)
+
+              const columnLookup: Record<string, string> = {};
+              for (const [, ctxData] of Object.entries(context)) {
+                const rows = flattenRows(ctxData);
+                if (rows.length === 0) continue;
+                const first = rows[0];
+                for (const [k, v] of Object.entries(first)) {
+                  if (!(k in columnLookup)) columnLookup[k] = v == null ? "" : String(v);
+                  const kl = k.toLowerCase();
+                  if (!(kl in columnLookup)) columnLookup[kl] = v == null ? "" : String(v);
+                }
+              }
+              const applyQueryColumnSubstitution = (val: string): string =>
+                val.replace(/\{\{(.+?)\}\}/g, (_m, name) => {
+                  if (name in columnLookup) return columnLookup[name];
+                  const lower = String(name).toLowerCase();
+                  if (lower in columnLookup) return columnLookup[lower];
+                  return _m;
+                });
+
+              const filenameSubbed = applyQueryColumnSubstitution(applyInputVarSubstitution(filenameTemplate))
                 .replace(/\{date\}/g, today)
                 .replace(/\{pulse_name\}/g, pulse.name)
                 .replace(/\{bill_number\}/g, billNumber);
               const originalFilename = filenameSubbed.toLowerCase().endsWith(".pdf") ? filenameSubbed : `${filenameSubbed}.pdf`;
 
               const metadataMappings = (sendCfg.metadataMappings || []) as Array<{
-                fieldName: string; source: string; sourceValue: string;
+                fieldName: string; source: string; sourceValue: string; sourceNodeId?: string;
               }>;
               const metadata: Record<string, string> = {};
               for (const m of metadataMappings) {
                 if (!m.fieldName) continue;
-                const raw = await resolveMappingValue(m.source, m.sourceValue);
+                const raw = await resolveMappingValue(m.source, m.sourceValue, m.sourceNodeId);
                 const val = applyInputVarSubstitution(raw);
                 if (val !== "") metadata[m.fieldName] = val;
               }
