@@ -778,13 +778,24 @@ Deno.serve(async (req: Request) => {
               const varName = (config.responseVariableName as string) || nodeId;
               context[varName] = apiData;
               const rows = flattenRows(apiData);
-              stepResults.push({ nodeId, name: stepName, type: "query", status: "success", rowCount: rows.length, inputs: { url, method: query.http_method, parameters: paramValues }, outputs: { variableName: varName, rowCount: rows.length }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+              const branch: "data" | "no-data" = rows.length > 0 ? "data" : "no-data";
+              stepResults.push({ nodeId, name: stepName, type: "query", status: "success", rowCount: rows.length, branch, inputs: { url, method: query.http_method, parameters: paramValues }, outputs: { variableName: varName, rowCount: rows.length, branch }, startedAt: stepStart, finishedAt: new Date().toISOString() });
+
+              // Follow edges — filter by branch handle when present
+              const nextEdges = adjacency.get(nodeId) || [];
+              const branchedEdges = nextEdges.filter(e => !e.sourceHandle || e.sourceHandle === branch);
+              for (const edge of branchedEdges) {
+                await executeNode(edge.target);
+              }
+              return;
             }
 
-            // Follow edges
+            // Error path (only reached when onError === 'continue'): follow untagged edges
             const nextEdges = adjacency.get(nodeId) || [];
             for (const edge of nextEdges) {
-              await executeNode(edge.target);
+              if (edge.sourceHandle && edge.sourceHandle !== "data" && edge.sourceHandle !== "no-data") continue;
+              if (edge.sourceHandle === "no-data") { await executeNode(edge.target); continue; }
+              if (!edge.sourceHandle) await executeNode(edge.target);
             }
           } catch (err) {
             stepResults.push({ nodeId, name: stepName, type: "query", status: "error", error: err instanceof Error ? err.message : String(err), startedAt: stepStart, finishedAt: new Date().toISOString() });
@@ -2156,6 +2167,9 @@ Deno.serve(async (req: Request) => {
             stepResults.push({ nodeId, name: stepName, type: "email", status: "error", error: err instanceof Error ? err.message : String(err), inputs: { to: (config.toRecipients || []) as string[], subject: (config.subject as string) || pulse.name }, startedAt: stepStart, finishedAt: new Date().toISOString() });
             throw err;
           }
+        } else if (node.type === "end") {
+          stepResults.push({ nodeId, name: stepName, type: "end", status: "success", startedAt: stepStart, finishedAt: new Date().toISOString() });
+          // Terminal: do not follow any edges
         }
       };
 
