@@ -100,19 +100,12 @@ export function useQueries() {
   const updateQuery = async (id: string, updates: Partial<Query>) => {
     const updateData = { ...updates, updated_at: new Date().toISOString() };
 
-    console.log('[DIAG useQueries.updateQuery] id:', id);
-    console.log('[DIAG useQueries.updateQuery] updateData.last_known_columns:', (updateData as { last_known_columns?: unknown }).last_known_columns);
-    console.log('[DIAG useQueries.updateQuery] full updateData keys:', Object.keys(updateData));
-
     const { data, error } = await supabase
       .from('queries')
       .update(updateData)
       .eq('id', id)
       .select()
       .single();
-
-    console.log('[DIAG useQueries.updateQuery] Supabase response error:', error);
-    console.log('[DIAG useQueries.updateQuery] Returned row last_known_columns:', (data as { last_known_columns?: unknown } | null)?.last_known_columns);
 
     if (error) return { error: error.message };
     await fetchQueries();

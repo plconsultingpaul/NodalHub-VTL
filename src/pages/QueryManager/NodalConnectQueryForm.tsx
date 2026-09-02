@@ -35,6 +35,52 @@ function mapNcParamType(ncType: string): UserParameterDataType {
   return NC_PARAM_TYPE_MAP[ncType] || 'Text';
 }
 
+function normalizeToColumnNames(raw: unknown): string[] {
+  if (raw == null) return [];
+
+  if (Array.isArray(raw)) {
+    if (
+      raw.length > 0 &&
+      typeof raw[0] === 'string' &&
+      (raw[0] as string).trimStart().startsWith('[')
+    ) {
+      try {
+        const rejoined = (raw as string[]).join(',');
+        return normalizeToColumnNames(JSON.parse(rejoined));
+      } catch {
+        // fall through to per-item mapping
+      }
+    }
+    return raw
+      .map((c) => {
+        if (typeof c === 'string') return c.trim();
+        if (c && typeof c === 'object' && 'name' in c) {
+          const name = (c as { name: unknown }).name;
+          return typeof name === 'string' ? name.trim() : '';
+        }
+        return '';
+      })
+      .filter((s): s is string => !!s);
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        return normalizeToColumnNames(JSON.parse(trimmed));
+      } catch {
+        // fall through to CSV split
+      }
+    }
+    return trimmed
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 function getEndpointAuthHeaders(endpoint: ApiEndpoint): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -97,26 +143,9 @@ export default function NodalConnectQueryForm({
 
   const [detectingParams, setDetectingParams] = useState(false);
   const [detectError, setDetectError] = useState('');
-  const [resultColumns, setResultColumns] = useState<string[]>(() => {
-    const raw = (query?.last_known_columns as unknown[]) || [];
-    console.log('[DIAG init] Raw query.last_known_columns from DB:', raw);
-    const parsed = raw
-      .map((c: unknown) => {
-        if (typeof c === 'string') {
-          if (c.startsWith('[') || c.startsWith('{') || c.startsWith('"')) {
-            console.warn('[DIAG init] FILTER dropped string entry (starts with [/{/"):', c);
-            return null;
-          }
-          return c;
-        }
-        if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name;
-        console.warn('[DIAG init] FILTER dropped non-string non-name entry:', c);
-        return null;
-      })
-      .filter((c): c is string => !!c);
-    console.log('[DIAG init] Parsed resultColumns after filter:', parsed);
-    return parsed;
-  });
+  const [resultColumns, setResultColumns] = useState<string[]>(() =>
+    normalizeToColumnNames(query?.last_known_columns)
+  );
   const [resultColumnsError, setResultColumnsError] = useState('');
   const [nameConflictChecking, setNameConflictChecking] = useState(false);
 
@@ -193,7 +222,6 @@ export default function NodalConnectQueryForm({
           for (const p of detected) {
             inputs[p.name.replace(/^@/, '')] = '';
           }
-          console.log('[detect-result-columns] PUT Request:', colUrl, inputs);
           const colResp = await proxyFetch(colUrl, {
             method: 'PUT',
             headers,
@@ -201,23 +229,13 @@ export default function NodalConnectQueryForm({
             endpointId: nodalEndpoint.id,
           });
           const colData = await colResp.json();
-          console.log('[detect-result-columns] PUT Response:', colResp.status, colData);
-          if (colResp.ok && colData?.resultColumns) {
-            const colNames = typeof colData.resultColumns === 'string'
-              ? colData.resultColumns.split(',').map((c: string) => c.trim()).filter(Boolean)
-              : Array.isArray(colData.resultColumns)
-                ? colData.resultColumns.map((c: { name: string } | string) => typeof c === 'string' ? c : c.name)
-                : [];
-            console.log('[DIAG detect] Parsed colNames from response:', colNames);
+          if (colResp.ok) {
+            const colNames = normalizeToColumnNames(colData?.resultColumns ?? colData?.columns);
             if (colNames.length > 0) {
-              console.log('[DIAG detect] Calling setResultColumns with:', colNames);
               setResultColumns(colNames);
-            } else {
-              console.warn('[DIAG detect] colNames empty; NOT updating state. Raw resultColumns:', colData.resultColumns);
             }
           } else {
             const errMsg = colData?.error || colData?.message || `Status ${colResp.status}`;
-            console.warn('[detect-result-columns] Failed:', errMsg);
             setResultColumnsError(errMsg);
           }
         } catch (colErr) {
@@ -375,16 +393,10 @@ export default function NodalConnectQueryForm({
       last_known_columns: resultColumns.length > 0 ? resultColumns : undefined,
     };
 
-    console.log('[DIAG save] resultColumns state at save time:', resultColumns);
-    console.log('[DIAG save] queryData.last_known_columns being sent to onSave:', queryData.last_known_columns);
-    console.log('[DIAG save] Full queryData payload:', queryData);
-
     await onSave(queryData);
-    console.log('[DIAG save] onSave completed');
 
     // Fire-and-forget: detect result columns after save
     if (name.trim()) {
-      console.log('[DIAG save] Triggering post-save detectResultColumns for:', name.trim());
       detectResultColumns(name.trim(), nodalEndpoint);
     }
   };
@@ -397,7 +409,6 @@ export default function NodalConnectQueryForm({
       for (const p of userParameters) {
         inputs[p.name.replace(/^@/, '')] = '';
       }
-      console.log('[detect-result-columns] POST-save PUT:', url, inputs);
       const response = await proxyFetch(url, {
         method: 'PUT',
         headers,
@@ -405,36 +416,21 @@ export default function NodalConnectQueryForm({
         endpointId: nodalEndpoint.id,
       });
       const data = await response.json();
-      console.log('[detect-result-columns] POST-save response:', response.status, data);
 
       if (!response.ok) return;
 
-      let cols: string[] = [];
-      if (typeof data?.resultColumns === 'string') {
-        cols = data.resultColumns.split(',').map((c: string) => c.trim()).filter(Boolean);
-      } else if (Array.isArray(data?.resultColumns)) {
-        cols = data.resultColumns.map((c: { name?: string } | string) => typeof c === 'string' ? c : (c.name || '')).filter(Boolean);
-      } else if (Array.isArray(data?.columns)) {
-        cols = data.columns.map((c: { name?: string } | string) => typeof c === 'string' ? c : (c.name || '')).filter(Boolean);
-      }
-
-      console.log('[DIAG post-save detect] Parsed cols:', cols);
-      if (cols.length === 0) {
-        console.log('[DIAG post-save detect] cols empty, skipping DB write');
-        return;
-      }
+      const cols = normalizeToColumnNames(data?.resultColumns ?? data?.columns);
+      if (cols.length === 0) return;
 
       setResultColumns(cols);
       setResultColumnsError('');
 
       if (activeCompany?.id) {
-        console.log('[DIAG post-save detect] Writing to supabase.queries.last_known_columns:', cols, 'for name:', queryName);
-        const { error: postSaveErr } = await supabase
+        await supabase
           .from('queries')
           .update({ last_known_columns: cols })
           .eq('name', queryName)
           .eq('company_id', activeCompany.id);
-        console.log('[DIAG post-save detect] supabase update result error:', postSaveErr);
       }
     } catch (err) {
       console.error('[detect-result-columns] POST-save error:', err);
