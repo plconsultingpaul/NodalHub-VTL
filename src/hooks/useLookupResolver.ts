@@ -36,6 +36,15 @@ function buildEndpointHeaders(endpoint: ApiEndpoint): Record<string, string> {
   return headers;
 }
 
+function getFieldCaseInsensitive(record: Record<string, unknown>, fieldName: string): unknown {
+  if (record[fieldName] !== undefined) return record[fieldName];
+  const target = fieldName.toLowerCase();
+  for (const key of Object.keys(record)) {
+    if (key.toLowerCase() === target) return record[key];
+  }
+  return undefined;
+}
+
 function extractRows(responseData: unknown): unknown[] {
   if (Array.isArray(responseData)) {
     return responseData;
@@ -181,8 +190,8 @@ export function useLookupResolver() {
 
       const options: LookupOption[] = items.map((item: unknown) => {
         const record = item as Record<string, unknown>;
-        const val = String(record[valueField] ?? '');
-        const lbl = String(record[labelField] ?? val);
+        const val = String(getFieldCaseInsensitive(record, valueField) ?? '');
+        const lbl = String(getFieldCaseInsensitive(record, labelField) ?? val);
         return { value: val, label: lbl };
       });
 
@@ -284,14 +293,16 @@ export function useLookupResolver() {
       const valueField = query.lookup_value_field || 'id';
       const labelField = query.lookup_label_field || 'name';
 
+      console.log('[LookupResolver] resolveLookupByQueryId - value field:', valueField, 'label field:', labelField, 'first row:', items.length > 0 ? JSON.stringify(items[0]) : 'N/A');
+
       const options: LookupOption[] = items.map((item: unknown) => {
         const record = item as Record<string, unknown>;
-        const val = String(record[valueField] ?? '');
-        const lbl = String(record[labelField] ?? val);
+        const val = String(getFieldCaseInsensitive(record, valueField) ?? '');
+        const lbl = String(getFieldCaseInsensitive(record, labelField) ?? val);
         return { value: val, label: lbl };
       });
 
-      console.log('[LookupResolver] resolveLookupByQueryId resolved', options.length, 'options');
+      console.log('[LookupResolver] resolveLookupByQueryId resolved', options.length, 'options. First:', options.length > 0 ? JSON.stringify(options[0]) : 'N/A');
 
       setLookupData(prev => ({
         ...prev,
