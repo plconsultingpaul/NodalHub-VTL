@@ -75,6 +75,8 @@ export default function PulseBuilder() {
   const [stepConfigs, setStepConfigs] = useState<Record<string, PulseStepConfig>>({});
   const [pulse, setPulse] = useState<Pulse | null>(null);
   const [pulseDraft, setPulseDraft] = useState<PulseInsert | null>(null);
+  const [createdByName, setCreatedByName] = useState<string | null>(null);
+  const [updatedByName, setUpdatedByName] = useState<string | null>(null);
 
   const [exportDraft, setExportDraft] = useState<Partial<PulseExport>>(emptyExportDraft());
   const [emailDraft, setEmailDraft] = useState<Partial<PulseEmail>>(emptyEmailDraft());
@@ -172,6 +174,44 @@ export default function PulseBuilder() {
       setEmailDraft(existingEmail);
     }
   }, [existingEmail]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadNames = async () => {
+      const ids = [pulse?.created_by, (pulse as unknown as { updated_by?: string } | null)?.updated_by]
+        .filter((v): v is string => !!v);
+      if (ids.length === 0) {
+        if (!cancelled) {
+          setCreatedByName(null);
+          setUpdatedByName(null);
+        }
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, username')
+        .in('id', ids);
+      if (cancelled) return;
+      const nameFor = (id?: string | null) => {
+        if (!id) return null;
+        const p = (data || []).find((r) => r.id === id);
+        return p?.full_name || p?.username || p?.email || null;
+      };
+      setCreatedByName(nameFor(pulse?.created_by));
+      setUpdatedByName(nameFor((pulse as unknown as { updated_by?: string } | null)?.updated_by));
+    };
+    loadNames();
+    return () => { cancelled = true; };
+  }, [pulse]);
+
+  const nextRunAt = (() => {
+    const times = (schedules || [])
+      .filter((s) => s.enabled && s.next_run_at)
+      .map((s) => new Date(s.next_run_at as string).getTime())
+      .filter((t) => !isNaN(t));
+    if (times.length === 0) return null;
+    return new Date(Math.min(...times)).toISOString();
+  })();
 
   const fetchLatestExecution = useCallback(async () => {
     if (!pulseBuilderPulseId) {
@@ -553,6 +593,9 @@ export default function PulseBuilder() {
             updatedAt={pulse?.updated_at}
             lastRunAt={pulse?.last_run_at}
             lastRunStatus={pulse?.last_run_status}
+            createdByName={createdByName}
+            updatedByName={updatedByName}
+            nextRunAt={nextRunAt}
           />
         )}
         {activeTab === 'schedule' && (
