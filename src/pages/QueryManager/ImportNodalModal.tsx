@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Loader2, Download, Database, FileCode, CheckCircle } from 'lucide-react';
+import { Search, Loader2, Download, Database, FileCode, CheckCircle, ChevronRight } from 'lucide-react';
 import { proxyFetch } from '../../lib/apiProxy';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
@@ -26,6 +26,8 @@ interface NodalExecutable {
   paramDefinition?: string;
   resultColumns?: string | string[];
 }
+
+const PAGE_SIZE = 100;
 
 function getEndpointAuthHeaders(endpoint: ApiEndpoint): Record<string, string> {
   const headers: Record<string, string> = {
@@ -81,6 +83,7 @@ export default function ImportNodalModal({
 }: ImportNodalModalProps) {
   const [executables, setExecutables] = useState<NodalExecutable[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -88,6 +91,9 @@ export default function ImportNodalModal({
   const [importSuccess, setImportSuccess] = useState(false);
   const [showDbPicker, setShowDbPicker] = useState(false);
   const [selectedDbConnectionId, setSelectedDbConnectionId] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalElements, setTotalElements] = useState(0);
 
   const availableDatabases = useMemo(
     () => nodalDatabases.filter(db => db.api_endpoint_id === nodalEndpoint.id),
@@ -96,7 +102,7 @@ export default function ImportNodalModal({
 
   useEffect(() => {
     if (isOpen) {
-      fetchExecutables();
+      fetchExecutables(1, true);
       setSelected(new Set());
       setSearchTerm('');
       setImportSuccess(false);
@@ -105,13 +111,17 @@ export default function ImportNodalModal({
     }
   }, [isOpen]);
 
-  const fetchExecutables = async () => {
-    setLoading(true);
+  const fetchExecutables = async (page: number, replace: boolean) => {
+    if (replace) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
     setError('');
 
     try {
       const headers = getEndpointAuthHeaders(nodalEndpoint);
-      const url = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage?size=200`;
+      const url = `${nodalEndpoint.url.replace(/\/$/, '')}/executables/manage?page=${page}&size=${PAGE_SIZE}`;
 
       const response = await proxyFetch(url, { method: 'GET', headers, endpointId: nodalEndpoint.id });
 
@@ -131,13 +141,40 @@ export default function ImportNodalModal({
         items = data?.content || data?.items || data?.executables || [];
       }
 
-      setExecutables(items);
+      const pageInfo = data?.page;
+      if (pageInfo) {
+        setTotalPages(pageInfo.totalPages ?? 1);
+        setTotalElements(pageInfo.totalElements ?? items.length);
+        setCurrentPage(pageInfo.number ?? page);
+      } else {
+        setTotalPages(1);
+        setTotalElements(items.length);
+      }
+
+      if (replace) {
+        setExecutables(items);
+      } else {
+        setExecutables(prev => {
+          const existingNames = new Set(prev.map(e => e.name));
+          const deduped = items.filter(e => !existingNames.has(e.name));
+          return [...prev, ...deduped];
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch executables');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
+
+  const handleLoadMore = () => {
+    if (currentPage < totalPages) {
+      fetchExecutables(currentPage + 1, false);
+    }
+  };
+
+  const hasMore = currentPage < totalPages;
 
   const existingNamesLower = useMemo(
     () => new Set(existingQueryNames.map(n => n.toLowerCase())),
@@ -326,78 +363,100 @@ export default function ImportNodalModal({
                   : 'All executables have already been imported.'}
               </div>
             ) : (
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0">
-                    <tr>
-                      <th className="px-3 py-2.5 text-left w-10">
-                        <input
-                          type="checkbox"
-                          checked={selected.size === filteredExecutables.length && filteredExecutables.length > 0}
-                          onChange={toggleSelectAll}
-                          className="rounded border-gray-300 dark:border-gray-600"
-                        />
-                      </th>
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">Type</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Database</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Description</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">Active</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {filteredExecutables.map((exec) => (
-                      <tr
-                        key={exec.name}
-                        className={`cursor-pointer transition-colors ${
-                          selected.has(exec.name)
-                            ? 'bg-blue-50 dark:bg-blue-900/20'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
-                        }`}
-                        onClick={() => toggleSelect(exec.name)}
-                      >
-                        <td className="px-3 py-2.5">
+              <>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2.5 text-left w-10">
                           <input
                             type="checkbox"
-                            checked={selected.has(exec.name)}
-                            onChange={() => toggleSelect(exec.name)}
-                            onClick={(e) => e.stopPropagation()}
+                            checked={selected.size === filteredExecutables.length && filteredExecutables.length > 0}
+                            onChange={toggleSelectAll}
                             className="rounded border-gray-300 dark:border-gray-600"
                           />
-                        </td>
-                        <td className="px-3 py-2.5 font-medium text-gray-900 dark:text-white">
-                          {exec.name}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
-                            exec.executableType === 'STORED_PROCEDURE'
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
-                              : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          }`}>
-                            {exec.executableType === 'STORED_PROCEDURE' ? (
-                              <FileCode className="w-3 h-3" />
-                            ) : (
-                              <Database className="w-3 h-3" />
-                            )}
-                            {getTypeLabel(exec.executableType)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 font-mono text-xs">
-                          {nodalDatabases.find(db => db.connection_id === exec.dbConnectionId)?.name || exec.dbConnectionId || '-'}
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
-                          {exec.description || '-'}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`inline-block w-2 h-2 rounded-full ${
-                            exec.active !== false ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                          }`} />
-                        </td>
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">Type</th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Database</th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Description</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">Active</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {filteredExecutables.map((exec) => (
+                        <tr
+                          key={exec.name}
+                          className={`cursor-pointer transition-colors ${
+                            selected.has(exec.name)
+                              ? 'bg-blue-50 dark:bg-blue-900/20'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
+                          }`}
+                          onClick={() => toggleSelect(exec.name)}
+                        >
+                          <td className="px-3 py-2.5">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(exec.name)}
+                              onChange={() => toggleSelect(exec.name)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded border-gray-300 dark:border-gray-600"
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 font-medium text-gray-900 dark:text-white">
+                            {exec.name}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                              exec.executableType === 'STORED_PROCEDURE'
+                                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                                : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                            }`}>
+                              {exec.executableType === 'STORED_PROCEDURE' ? (
+                                <FileCode className="w-3 h-3" />
+                              ) : (
+                                <Database className="w-3 h-3" />
+                              )}
+                              {getTypeLabel(exec.executableType)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 font-mono text-xs">
+                            {nodalDatabases.find(db => db.connection_id === exec.dbConnectionId)?.name || exec.dbConnectionId || '-'}
+                          </td>
+                          <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
+                            {exec.description || '-'}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`inline-block w-2 h-2 rounded-full ${
+                              exec.active !== false ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                            }`} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {hasMore && (
+                  <div className="flex items-center justify-center">
+                    <Button
+                      variant="secondary"
+                      onClick={handleLoadMore}
+                      loading={loadingMore}
+                      disabled={loadingMore}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                      Load More ({executables.length} of {totalElements} loaded)
+                    </Button>
+                  </div>
+                )}
+
+                {!hasMore && totalElements > PAGE_SIZE && (
+                  <div className="text-center text-xs text-gray-400 dark:text-gray-500">
+                    All {totalElements} executables loaded
+                  </div>
+                )}
+              </>
             )}
 
             <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
